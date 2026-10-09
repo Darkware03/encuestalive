@@ -113,10 +113,20 @@ class SurveyPolicy
         ], true);
     }
 
-    /** Descarga del QR. Requiere `public_id`, que solo existe tras publicar. */
+    /**
+     * Descarga del QR: SOLO propiedad.
+     *
+     * La ausencia de `public_id` NO se comprueba aqui a proposito. Si se
+     * comprobara, un borrador propio daria 403 ("no es tuyo") cuando la
+     * verdad es 409 ("es tuyo, pero aun no se ha publicado"), que es lo que
+     * fija API.md §3.1. Mezclar autorizacion y estado en la misma respuesta
+     * confunde a quien integra y oculta el motivo real.
+     *
+     * El 409 lo emite QrController, que es quien conoce el contrato HTTP.
+     */
     public function viewQr(User $user, Survey $survey): bool
     {
-        return $this->owns($user, $survey) && $survey->public_id !== null;
+        return $this->owns($user, $survey);
     }
 
     private function owns(User $user, Survey $survey): bool

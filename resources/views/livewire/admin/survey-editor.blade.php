@@ -12,8 +12,6 @@
 <div>
     <x-slot:title>{{ $survey->title }}</x-slot:title>
 
-    <x-slot:breadcrumbs>{{ [] }}</x-slot:breadcrumbs>
-
     {{-- ================================================ AVISOS Y ERRORES --}}
     @if ($flash)
         <div class="mb-6"><x-alert tone="success">{{ $flash }}</x-alert></div>

@@ -40,6 +40,27 @@ trait BuildsSurveys
         return User::factory()->create();
     }
 
+    /**
+     * Empieza una sesion de participante COMPLETAMENTE nueva.
+     *
+     * Imprescindible para simular varias personas en una misma prueba, y
+     * mucho menos obvio de lo que parece: `withUnencryptedCookies()` hace
+     * `array_merge` sobre `$this->unencryptedCookies`
+     * (MakesHttpRequests.php:266), asi que vaciar solo el tarro propio NO
+     * borra las cookies que el framework ya acumulo. El segundo participante
+     * seguiria enviando la cookie del primero, reutilizaria su sesion, su
+     * envio chocaria con el anti-duplicado y la prueba mediria UNA persona
+     * creyendo que mide tres.
+     *
+     * Se limpian las tres estructuras, no solo la propia.
+     */
+    protected function newParticipant(): void
+    {
+        $this->participantJar = [];
+        $this->unencryptedCookies = [];
+        $this->defaultCookies = [];
+    }
+
     /** Guarda las cookies de una respuesta para la siguiente peticion. */
     protected function captureCookies($response): void
     {
