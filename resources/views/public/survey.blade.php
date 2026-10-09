@@ -21,7 +21,7 @@
     $questionCount = $survey->questions->count();
 @endphp
 
-<x-layouts.participant
+<x-layouts::participant
     :title="$survey->title"
     :connection="$acceptsResponses ? 'online' : 'stale'"
 >
@@ -232,4 +232,4 @@
             </p>
         </x-slot:actionBar>
     @endif
-</x-layouts.participant>
+</x-layouts::participant>

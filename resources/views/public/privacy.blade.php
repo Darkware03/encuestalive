@@ -8,7 +8,7 @@
 
     Prometer "anonimato total" seria mas bonito y seria falso.
 --}}
-<x-layouts.participant title="Como tratamos los datos">
+<x-layouts::participant title="Como tratamos los datos">
     <h1 class="text-2xl font-bold text-ink-900">Como tratamos los datos</h1>
 
     <div class="mt-6 flex flex-col gap-6 text-base text-ink-800">
@@ -77,4 +77,4 @@
             </ul>
         </section>
     </div>
-</x-layouts.participant>
+</x-layouts::participant>
