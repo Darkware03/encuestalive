@@ -32,15 +32,40 @@ return [
 
     'connections' => [
 
+        /*
+        |----------------------------------------------------------------------
+        | SQLite — EncuestaLive (ADR-0003, D-04)
+        |----------------------------------------------------------------------
+        | Los tres PRAGMA de abajo se aplican AQUI, en el conector, y no en cada
+        | migracion: Laravel los ejecuta al abrir CADA conexion nueva. Ponerlos en
+        | una migracion solo los activaria durante esa migracion.
+        |
+        | foreign_key_constraints: SQLite entrega `PRAGMA foreign_keys` en 0 (OFF)
+        |   por defecto (verificado, ARCHITECTURE.md V14). Sin esto TODAS las claves
+        |   foraneas del esquema serian decorativas aqui y solo fallarian en MySQL 8,
+        |   es decir, en produccion. D-04 lo declara obligatorio.
+        |   Demostrado por tests/Feature/Database/ForeignKeyEnforcementTest.php.
+        |
+        | journal_mode WAL: lectores concurrentes mientras hay un escritor. Es
+        |   exactamente el patron de EncuestaLive (muchos dashboards leyendo,
+        |   escrituras cortas de heartbeat y respuestas). Mitiga el riesgo R3.
+        |   En `:memory:` SQLite ignora WAL y responde `memory`: es esperado.
+        |
+        | busy_timeout 5000 ms: ante `database is locked`, reintenta en vez de
+        |   fallar de inmediato. Segunda mitigacion de R3.
+        |
+        | Nada de esto aplica a MySQL 8, que es el destino declarado (D-04): alli
+        | las FK son obligatorias por definicion y no hay bloqueo de fichero.
+        */
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
-            'synchronous' => null,
+            'busy_timeout' => env('DB_BUSY_TIMEOUT', 5000),
+            'journal_mode' => env('DB_JOURNAL_MODE', 'WAL'),
+            'synchronous' => env('DB_SYNCHRONOUS', 'NORMAL'),
             'transaction_mode' => 'DEFERRED',
         ],
 
