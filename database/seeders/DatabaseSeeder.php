@@ -2,24 +2,26 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
+/**
+ * Punto de entrada de `php artisan db:seed` y de `migrate:fresh --seed`.
+ *
+ * TODOS los seeders de EncuestaLive son IDEMPOTENTES: correrlos varias veces
+ * sobre la misma base deja exactamente el mismo estado (ver cada clase).
+ * Siembran unicamente DATOS FICTICIOS.
+ *
+ * NO se usa el trait WithoutModelEvents a proposito: SecurityEvent depende de su
+ * evento `saving` para truncar occurred_at al minuto (ARCHITECTURE §7.3).
+ * Silenciar los eventos de modelo romperia esa mitigacion durante el sembrado.
+ */
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
-    /**
-     * Seed the application's database.
-     */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        $this->call([
+            AdminUserSeeder::class,
+            DemoSurveySeeder::class,
         ]);
     }
 }
