@@ -12,6 +12,18 @@
  * Livewire 4 se encarga de la reactividad con servidor en la Fase 5b.
  */
 
+/*
+ * CAMBIO MINIMO DE LA FASE 5b (backend-engineer), reportado en el informe.
+ *
+ * Unica linea anadida a este fichero. `realtime.js` es quien llama a
+ * `setConnectionState()`, la API que este fichero ya exponia en la Fase 5a y
+ * que hasta ahora nadie invocaba por no haber socket real que observar.
+ *
+ * Va al final del arranque y en un modulo aparte para que siga siendo cierto
+ * lo que dice la cabecera: si el tiempo real falla, nada esencial se rompe.
+ */
+import './realtime.js';
+
 /* ------------------------------------------------------------------ utils */
 
 const onReady = (fn) =>

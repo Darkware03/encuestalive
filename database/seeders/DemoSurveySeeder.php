@@ -40,7 +40,23 @@ use Illuminate\Support\Facades\DB;
 class DemoSurveySeeder extends Seeder
 {
     public const DEMO_ACTIVE_PUBLIC_ID = 'DEM0K7M2QX9RTB4W';
-    public const DEMO_CLOSED_PUBLIC_ID = 'DEM0CL0SED9XKT2V';
+
+    /*
+     * CORREGIDO EN LA FASE 5b (backend-engineer), reportado en el informe.
+     *
+     * El valor anterior era 'DEM0CL0SED9XKT2V', que se leia bien ("DEMO
+     * CLOSED") pero contenia 'L' y 'O'. El alfabeto Base32 Crockford de
+     * ADR-0006 excluye expresamente I, L, O y U para que el identificador se
+     * pueda dictar en voz alta sin confusiones, y el patron de la ruta
+     * publica es '[0-9A-HJKMNP-TV-Z]{16}'.
+     *
+     * Consecuencia real, no teorica: /s/DEM0CL0SED9XKT2V NO ENCAJABA en la
+     * ruta y devolvia 404, de modo que la encuesta cerrada de demostracion
+     * era inalcanzable y no se podia verificar CA-13 con datos del seeder.
+     *
+     * El valor nuevo respeta el alfabeto y conserva la legibilidad.
+     */
+    public const DEMO_CLOSED_PUBLIC_ID = 'DEM0CERRADA9XKT2';
 
     /** Titulo del borrador: no tiene public_id con el que identificarlo (ADR-0006). */
     public const DEMO_DRAFT_TITLE = '[DEMO] Borrador sin publicar';
