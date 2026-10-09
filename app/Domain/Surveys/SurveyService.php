@@ -40,9 +40,9 @@ class SurveyService
     public function create(User $actor, array $attributes): Survey
     {
         $survey = new Survey([
-            'title' => trim((string) ($attributes['title'] ?? '')),
-            'description' => $attributes['description'] ?? null,
-            'instructions' => $attributes['instructions'] ?? null,
+            'title' => $this->boundedTitle($attributes['title'] ?? ''),
+            'description' => $this->boundedOptional($attributes['description'] ?? null, 'survey_description', 'description', 'La descripcion'),
+            'instructions' => $this->boundedOptional($attributes['instructions'] ?? null, 'survey_instructions', 'instructions', 'Las instrucciones'),
             'status' => Survey::STATUS_DRAFT,
             'version_number' => 1,
             'created_by_user_id' => $actor->id,
@@ -71,9 +71,19 @@ class SurveyService
         $before = $survey->only(['title', 'description', 'instructions', 'starts_at', 'ends_at']);
 
         $survey->fill([
-            'title' => trim((string) ($attributes['title'] ?? $survey->title)),
-            'description' => $attributes['description'] ?? $survey->description,
-            'instructions' => $attributes['instructions'] ?? $survey->instructions,
+            'title' => $this->boundedTitle($attributes['title'] ?? $survey->title),
+            'description' => $this->boundedOptional(
+                $attributes['description'] ?? $survey->description,
+                'survey_description',
+                'description',
+                'La descripcion',
+            ),
+            'instructions' => $this->boundedOptional(
+                $attributes['instructions'] ?? $survey->instructions,
+                'survey_instructions',
+                'instructions',
+                'Las instrucciones',
+            ),
         ]);
 
         if ($this->states->isStructurallyEditable($survey)) {
@@ -281,7 +291,11 @@ class SurveyService
     {
         return DB::transaction(function () use ($actor, $survey, $title): Survey {
             $copy = new Survey([
-                'title' => $title ?? $this->nextVersionTitle($survey),
+                // F-05: un titulo explicito tambien pasa por el limite. El
+                // generado por nextVersionTitle ya viene recortado.
+                'title' => $title !== null
+                    ? $this->boundedTitle($title)
+                    : $this->nextVersionTitle($survey),
                 'description' => $survey->description,
                 'instructions' => $survey->instructions,
                 'status' => Survey::STATUS_DRAFT,
@@ -474,6 +488,91 @@ class SurveyService
             'metadata' => $metadata ?: null,
             'occurred_at' => Carbon::now(),
         ]);
+    }
+
+    /**
+     * F-05 (MEDIO, Fase 7) — EL CAMINO DE SERVICIO NO VALIDABA LONGITUDES.
+     *
+     * ==================================================================
+     *  EL HUECO
+     * ==================================================================
+     * `surveys.title` es VARCHAR(150). La longitud se validaba en DOS sitios,
+     * y ninguno cubria este camino:
+     *
+     *   · SurveyEditor (Livewire)        -> solo si se pasa por la interfaz web
+     *   · SurveyValidator::publication() -> solo AL PUBLICAR
+     *
+     * `SurveyService::create()/update()` se limitaban a `trim()`. El auditor
+     * metio 10 000 caracteres por create() y 20 000 por update(), y ambos se
+     * persistieron intactos.
+     *
+     * SQLite no aplica longitudes de VARCHAR, asi que en desarrollo no pasa
+     * nada. Pero D-04 fija MySQL 8 como destino: alli el mismo INSERT FALLA
+     * con error 1406, o —peor— TRUNCA EN SILENCIO si alguien desactiva
+     * STRICT_TRANS_TABLES. Es una bomba de relojeria de despliegue: una
+     * operacion que funciona en desarrollo revienta o corrompe el dato en
+     * produccion. Exactamente lo que DATABASE.md §10.1 queria evitar.
+     *
+     * La correccion lleva el limite al SERVICIO, que es la frontera real del
+     * dominio, con el mismo patron que QuestionService::boundedText() ya
+     * establecia para `prompt` y `label`. Asi la regla deja de depender de
+     * que capa invoque la operacion.
+     *
+     * NO se valida aqui la longitud MINIMA ni la obligatoriedad: un borrador
+     * recien creado puede tener el titulo a medias, y RN-01 ya exige 3
+     * caracteres AL PUBLICAR (SurveyValidator). Mover eso aqui cambiaria el
+     * ciclo de vida del producto, y la correccion debe ser la minima.
+     *
+     * LIMITACION DECLARADA: no hay MySQL 8 en este host, asi que el fallo
+     * 1406 que esto previene no se ha podido reproducir. Lo verificado es que
+     * el servicio ahora rechaza el texto que desbordaria la columna.
+     *
+     * @throws ValidationException si el texto supera el limite declarado
+     */
+    private function boundedTitle(mixed $value): string
+    {
+        $text = trim((string) $value);
+        $max = (int) config('encuestalive.limits.survey_title');
+
+        if (mb_strlen($text) > $max) {
+            throw ValidationException::withMessages([
+                'title' => sprintf('El titulo no puede superar los %d caracteres.', $max),
+            ]);
+        }
+
+        return $text;
+    }
+
+    /**
+     * Igual que lo anterior para los campos opcionales.
+     *
+     * `description` e `instructions` son TEXT, no VARCHAR, asi que no
+     * desbordan la columna en MySQL. Se acotan igualmente porque
+     * `config/encuestalive.php` DECLARA un limite para ellos y la interfaz web
+     * ya lo aplica: que el mismo dato se acepte o se rechace segun por donde
+     * entre es el defecto de fondo de F-05, no el numero concreto.
+     *
+     * El `null` se conserva como `null`: no se convierte en cadena vacia, que
+     * seria un cambio de semantica en la base de datos.
+     *
+     * @throws ValidationException
+     */
+    private function boundedOptional(mixed $value, string $limitKey, string $field, string $label): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $text = (string) $value;
+        $max = (int) config('encuestalive.limits.'.$limitKey);
+
+        if (mb_strlen($text) > $max) {
+            throw ValidationException::withMessages([
+                $field => sprintf('%s no puede superar los %d caracteres.', $label, $max),
+            ]);
+        }
+
+        return $text;
     }
 
     private function nextVersionTitle(Survey $survey): string

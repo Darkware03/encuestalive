@@ -50,6 +50,56 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Limitacion de frecuencia (brief §6.1, hallazgo F-06)
+    |--------------------------------------------------------------------------
+    |
+    | ================= EL COMPROMISO, EXPLICADO =================
+    | Brief §6.1: una sala de 200 personas con un unico wifi COMPARTE UNA SOLA
+    | IP PUBLICA, y D-05 PA-01 fija 300 sesiones simultaneas como objetivo. Un
+    | limite por IP ingenuo cerraria la encuesta a los demas en cuanto
+    | respondiera el primero, y ese es literalmente el caso de uso principal.
+    |
+    | Por eso la clave PRIMARIA sigue siendo el token de sesion: 300 telefonos
+    | tras una IP son 300 cubos independientes. Eso no cambia.
+    |
+    | Lo que F-06 corrige es que `public-open`, `heartbeat` y `public-state` no
+    | tenian NINGUNA red de seguridad por IP, de modo que un cliente que
+    | acumulara tokens podia crecer sin techo. Ahora hay un segundo cubo por
+    | IP, dimensionado MUY por encima del uso humano legitimo:
+    |
+    |   · 300 participantes abriendo la pagina y recargando algo    -> 1200/min
+    |   · 300 participantes latiendo cada 20 s (3/min) con margen   -> 3000/min
+    |   · 300 participantes sondeando el estado cada 5 s (12/min)   -> 6000/min
+    |
+    | PRECIO QUE SE PAGA, SIN ADORNOS: un techo por IP nunca es gratis. Si una
+    | sola IP llevara MAS de ~300 personas muy activas, empezaria a recibir
+    | 429. Se ha preferido ese riesgo remoto a dejar tres rutas sin techo
+    | alguno, porque `heartbeat` ESCRIBE en participant_sessions y SQLite
+    | admite un unico escritor (riesgo R3). El techo acota la amplificacion;
+    | no la elimina.
+    |
+    | Son configurables precisamente para que el propietario pueda subirlos
+    | si su evento es mayor, sin tocar codigo.
+    |
+    */
+    'rate_limits' => [
+        'public_open_per_token' => (int) env('RL_PUBLIC_OPEN_TOKEN', 60),
+        'public_open_per_ip' => (int) env('RL_PUBLIC_OPEN_IP', 1200),
+
+        'heartbeat_per_token' => (int) env('RL_HEARTBEAT_TOKEN', 10),
+        'heartbeat_per_ip' => (int) env('RL_HEARTBEAT_IP', 3000),
+
+        'public_state_per_token' => (int) env('RL_PUBLIC_STATE_TOKEN', 30),
+        'public_state_per_ip' => (int) env('RL_PUBLIC_STATE_IP', 6000),
+
+        'submit_per_token' => (int) env('RL_SUBMIT_TOKEN', 5),
+        'submit_per_ip' => (int) env('RL_SUBMIT_IP', 40),
+
+        'session_issue_per_ip' => (int) env('RL_SESSION_ISSUE_IP', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Retencion (D-12, brief §5.3)
     |--------------------------------------------------------------------------
     |
@@ -116,7 +166,23 @@ return [
     'export' => [
         // D-06: el CSV exporta AMBAS bases de porcentaje en columnas separadas.
         'include_both_percentage_bases' => true,
-        // brief §6.2: prefijos que convierten una celda en formula.
-        'formula_prefixes' => ['=', '+', '-', '@', "\t", "\r"],
+        /*
+         * brief §6.2: caracteres que convierten una celda en formula.
+         *
+         * F-03 (Fase 7): esta lista traia tambien "\t" y "\r", lo que
+         * describia mal el control y dejaba fuera a LF, al espacio y al NBSP,
+         * que escapaban. Ya no es una lista de "primeros bytes peligrosos":
+         * CsvInjectionSanitizer RECORTA todo el espacio en blanco inicial
+         * (incluidos TAB, CR, LF, NBSP, BOM y los espacios Unicode) y despues
+         * compara el primer caracter SIGNIFICATIVO contra estos cuatro.
+         *
+         * Por eso TAB y CR salen de aqui: no son prefijos de formula, son
+         * espacio en blanco que se recorta antes de decidir. `\t=1+1` sigue
+         * neutralizandose; `\t1+1` no, porque no es una formula.
+         *
+         * La coherencia entre esta lista y el saneador la verifica
+         * tests/Feature/Export/CsvInjectionSanitizerTest.php.
+         */
+        'formula_prefixes' => ['=', '+', '-', '@'],
     ],
 ];

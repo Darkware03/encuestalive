@@ -8,6 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -38,6 +39,30 @@ return Application::configure(basePath: dirname(__DIR__))
          */
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        /*
+         * Fase 7b: las cabeceras de seguridad TAMBIEN en las respuestas de
+         * error.
+         *
+         * Detectado con `curl` contra el servidor real al verificar F-08/F-11
+         * (la suite daba un falso verde). Cuando `auth` rechaza a un anonimo
+         * lanza AuthenticationException, que Laravel captura FUERA de la
+         * tuberia de middleware: el codigo posterior a `$next($request)` de
+         * SecurityHeaders no llega a ejecutarse nunca. Medido antes del
+         * arreglo:
+         *
+         *     GET /admin              -> sin CSP, sin Permissions-Policy,
+         *                                CON X-Powered-By
+         *     POST /broadcasting/auth -> idem
+         *
+         * Justo la superficie administrativa. `respond()` es el unico punto
+         * por el que pasan todas las respuestas de error, asi que se aplican
+         * aqui las mismas cabeceras que en el camino normal, reutilizando el
+         * middleware en lugar de duplicar la lista.
+         */
+        $exceptions->respond(function (SymfonyResponse $response, \Throwable $e, Request $request): SymfonyResponse {
+            return app(SecurityHeaders::class)->apply($request, $response);
+        });
+
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
