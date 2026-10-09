@@ -1,9 +1,313 @@
-@import 'tailwindcss';
+/*
+ * app.css — EncuestaLive
+ *
+ * Orden de carga (importa, no reordenar):
+ *   1. tailwindcss        → preflight + motor de utilidades
+ *   2. tokens.css         → @theme GENERADO desde design-tokens.json
+ *   3. fonts.css          → Inter autoalojada (sin CDN en runtime)
+ *   4. base / components  → lo que las utilidades no pueden expresar
+ *
+ * Stack: Blade + Livewire 4 + Tailwind 4 (ADR-0001). Sin Vue, sin React.
+ * Modo oscuro: FUERA del MVP (D-03). No hay variante `dark:` en esta hoja.
+ */
 
+@import 'tailwindcss';
+@import './tokens.css';
+@import './fonts.css';
+
+/* Blade/Livewire que Tailwind debe escanear además de los predeterminados */
+@source '../views';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
-@theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+/* ==========================================================================
+   BASE
+   ========================================================================== */
+@layer base {
+    html {
+        /* UX_UI_SPEC §9.6 / WCAG 1.4.4: todo en rem, nunca bloquear el zoom. */
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+        /* §9.2 / WCAG 2.4.11: el foco no puede quedar tapado por barras fijas. */
+        scroll-padding-bottom: 6rem;
+        scroll-padding-top: 4rem;
+    }
+
+    body {
+        background-color: var(--color-surface-canvas);
+        color: var(--color-ink-900);
+        font-family: var(--font-sans);
+        font-size: var(--text-base);
+        line-height: var(--text-base--line-height);
+        -webkit-font-smoothing: antialiased;
+    }
+
+    /*
+     * §6.0 — PATRÓN DE FOCO ÚNICO EN TODO EL PRODUCTO.
+     * :focus-visible, nunca :focus (dispararía el anillo también con ratón).
+     * 2px + 2px de separación. WCAG 2.2 §2.4.13 Focus Appearance.
+     * Prohibido `outline: none` sin sustituto: esta regla ES el sustituto.
+     */
+    :focus-visible {
+        outline: 2px solid var(--color-border-focus);
+        outline-offset: 2px;
+        border-radius: inherit;
+    }
+
+    /* §5.3 regla 1 — 16px mínimo en todo control de texto.
+       Por debajo, iOS Safari hace zoom al enfocar y descoloca el formulario (A4). */
+    input,
+    textarea,
+    select {
+        font-size: max(1rem, var(--text-base));
+        font-family: inherit;
+    }
+
+    ::placeholder {
+        color: var(--color-state-placeholder); /* #616978 · 5.53:1 */
+        opacity: 1; /* Firefox lo atenúa por defecto y rompería el contraste */
+    }
+
+    /* §5.3 regla 2 — tabular-nums en todo número que cambie en vivo */
+    [data-numeric],
+    .tabular {
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: var(--numeric-features);
+    }
+
+    /* §9.6 / A8 — texto libre del participante sin espacios no puede romper el diseño */
+    [data-user-text] {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    /*
+     * §5.9 — prefers-reduced-motion anula TODO. Obligatorio, no opcional.
+     * Valor textual tomado de design-tokens.json → motion.reducedMotion.
+     */
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}
+
+/* ==========================================================================
+   UTILIDADES PROPIAS
+   ========================================================================== */
+@layer utilities {
+    /* Oculto visualmente pero accesible para lectores de pantalla */
+    .sr-only-focusable:not(:focus):not(:focus-within) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+    }
+
+    /* Objetivos táctiles del proyecto (§9.5) */
+    .target-min {
+        min-block-size: var(--touch-recommended); /* 44px */
+        min-inline-size: var(--touch-recommended);
+    }
+
+    .target-comfortable {
+        min-block-size: var(--touch-comfortable); /* 48px */
+    }
+}
+
+/* ==========================================================================
+   COMPONENTES — solo lo que las utilidades no pueden expresar
+   (animación del skeleton, congelado de ancho del botón en carga, scrim…)
+   El resto del estilo vive en las clases Tailwind de resources/views/components.
+   ========================================================================== */
+@layer components {
+    /*
+     * §6.12 — Skeleton: brillo ink-300 desplazándose sobre base ink-100, 1,4 s.
+     * Bajo prefers-reduced-motion pasa a COLOR PLANO, sin animación (riesgo A9).
+     */
+    .el-skeleton {
+        background-color: var(--color-ink-100);
+        background-image: linear-gradient(
+            90deg,
+            transparent 0%,
+            var(--color-ink-300) 50%,
+            transparent 100%
+        );
+        background-size: 200% 100%;
+        background-repeat: no-repeat;
+        animation: el-skeleton-shimmer 1400ms ease-in-out infinite;
+    }
+
+    @keyframes el-skeleton-shimmer {
+        0% {
+            background-position: -100% 0;
+        }
+        100% {
+            background-position: 200% 0;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .el-skeleton {
+            background-image: none;
+            animation: none;
+        }
+    }
+
+    /*
+     * §6.1 — botón en carga: el ancho se CONGELA al del reposo para que no
+     * salte al cambiar «Publicar» por «Publicando…» (wireframes-states 16.c).
+     */
+    .el-btn[aria-busy='true'] {
+        min-inline-size: var(--el-btn-frozen-width, auto);
+    }
+
+    /* Spinner de 16/20px usado en botones, inputs con validación remota y
+       en el estado «reconectando». Se detiene con reduced-motion. */
+    .el-spinner {
+        animation: el-spin 800ms linear infinite;
+    }
+
+    @keyframes el-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .el-spinner {
+            animation: none;
+        }
+    }
+
+    /*
+     * §6.11 — scrim del modal. Color exacto de design-tokens surface.overlay.
+     */
+    .el-scrim {
+        background-color: var(--color-surface-overlay);
+    }
+
+    /* Barra fija inferior del participante: respeta el área segura de iOS */
+    .el-action-bar {
+        padding-bottom: calc(var(--spacing) * 4 + env(safe-area-inset-bottom, 0px));
+    }
+
+    /*
+     * §6.3 / §6.4 — radio y checkbox NATIVOS con apariencia propia.
+     * Se usa el elemento nativo (no role="radio") para conservar grupo,
+     * navegación con flechas y anuncio correcto del lector de pantalla.
+     */
+    .el-control-dot {
+        appearance: none;
+        -webkit-appearance: none;
+        flex: 0 0 auto;
+        inline-size: 1.25rem; /* 20px */
+        block-size: 1.25rem;
+        border: 2px solid var(--color-border-strong);
+        background-color: var(--color-ink-0);
+        display: grid;
+        place-content: center;
+        cursor: pointer;
+        transition: border-color var(--duration-fast) var(--ease-standard),
+            background-color var(--duration-fast) var(--ease-standard);
+    }
+
+    .el-control-dot:disabled {
+        cursor: not-allowed;
+        border-color: var(--color-ink-300);
+        background-color: var(--color-ink-100);
+    }
+
+    /* radio */
+    .el-control-dot[type='radio'] {
+        border-radius: var(--radius-full);
+    }
+
+    .el-control-dot[type='radio']::before {
+        content: '';
+        inline-size: 0.625rem; /* 10px */
+        block-size: 0.625rem;
+        border-radius: var(--radius-full);
+        transform: scale(0);
+        background-color: var(--color-brand-700);
+        transition: transform var(--duration-fast) var(--ease-standard);
+    }
+
+    .el-control-dot[type='radio']:checked {
+        border-color: var(--color-brand-700);
+    }
+
+    .el-control-dot[type='radio']:checked::before {
+        transform: scale(1);
+    }
+
+    /* checkbox */
+    .el-control-dot[type='checkbox'] {
+        border-radius: var(--radius-sm);
+    }
+
+    .el-control-dot[type='checkbox']::before {
+        content: '';
+        inline-size: 0.75rem;
+        block-size: 0.75rem;
+        transform: scale(0);
+        transform-origin: center;
+        background-color: var(--color-ink-0);
+        clip-path: polygon(
+            14% 44%,
+            0 65%,
+            50% 100%,
+            100% 16%,
+            80% 0%,
+            43% 62%
+        );
+        transition: transform var(--duration-fast) var(--ease-standard);
+    }
+
+    .el-control-dot[type='checkbox']:checked {
+        border-color: var(--color-brand-700);
+        background-color: var(--color-brand-700);
+    }
+
+    .el-control-dot[type='checkbox']:checked::before {
+        transform: scale(1);
+    }
+
+    .el-control-dot[type='checkbox']:disabled:checked {
+        background-color: var(--color-ink-300);
+        border-color: var(--color-ink-300);
+    }
+
+    /*
+     * §6.3 — el anillo de foco debe rodear LA FILA COMPLETA, no el círculo.
+     * El input nativo mantiene el foco; la fila lo refleja con :has().
+     */
+    .el-option-row:has(.el-control-dot:focus-visible) {
+        outline: 2px solid var(--color-border-focus);
+        outline-offset: 2px;
+    }
+
+    .el-control-dot:focus-visible {
+        outline: none; /* sustituido por el anillo de la fila, arriba */
+    }
+
+    /* §6.15 — relleno de la barra de progreso con la transición `slow` (320ms) */
+    .el-progress-fill {
+        transition: inline-size var(--duration-slow) var(--ease-standard);
+    }
+
+    /* §7.1 — interpolación de barras de gráfico en vivo: 400ms, sin saltos */
+    .el-chart-bar-fill {
+        transition: inline-size var(--duration-chart) var(--ease-standard);
+    }
 }

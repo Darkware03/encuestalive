@@ -1,0 +1,234 @@
+/*
+ * tokens.css — GENERADO AUTOMÁTICAMENTE. NO EDITAR A MANO.
+ *
+ * Fuente:   /software-factory/deliverables/encuestalive/design-tokens.json
+ * Versión:  1.0.0  ·  Fase 2 — UX/UI
+ * Generador: tools/build-tokens.mjs   (node tools/build-tokens.mjs)
+ *
+ * Contraste: 56/56 pares verificados WCAG 2.2 AA en UX_UI_SPEC.md §5.2.
+ * Cambiar un hex aquí INVALIDA esa verificación: cámbialo en design-tokens.json
+ * y recalcula el contraste antes.
+ *
+ * RESTRICCIONES DE USO (UX_UI_SPEC §5.1, $meta.notes del JSON):
+ *   - ink-400 (#94A1B4) en modo claro es DECORATIVO. Ratio 2.62:1 sobre blanco. PROHIBIDO usarlo para texto o iconos con significado.
+ *   - border-subtle (#DDE3EC) es un divisor DECORATIVO (1.29:1). Los limites de controles interactivos DEBEN usar border-strong (#78849A, 3.77:1).
+ *   - El modo oscuro es OPCIONAL y post-MVP. Ver UX_UI_SPEC.md seccion 11.
+ */
+
+@theme {
+  /* ---------- color ---------- */
+  --color-brand-50: #EEF3FF;  /* Fondo de boton secundario, fila seleccionada, relleno de badge informativo de marca */
+  --color-brand-100: #DCE6FF;  /* Hover de boton secundario, pista de barra de progreso */
+  --color-brand-200: #BBCDFF;  /* Bordes decorativos de marca, skeleton con tinte */
+  --color-brand-300: #9DB6F7;  /* Enlace y anillo de foco en MODO OSCURO (8.14:1 sobre surface-d) */
+  --color-brand-400: #6C8EF5;  /* Relleno de boton primario en MODO OSCURO (label ink-950, 5.94:1) */
+  --color-brand-500: #3F67E0;  /* Color de marca puro. Solo decorativo/logo. NO usar como texto sobre blanco */
+  --color-brand-600: #2F5BDC;  /* Acento interactivo. Texto sobre blanco 5.75:1 */
+  --color-brand-700: #1B3AA8;  /* PRIMARIO. Boton primario, enlaces, anillo de foco. 9.47:1 sobre blanco */
+  --color-brand-800: #162C7A;  /* Hover de primario. 12.53:1 sobre blanco */
+  --color-brand-900: #101F55;  /* Active/pressed de primario. 15.56:1 sobre blanco */
+  --color-brand-950: #0A1436;  /* Cabecera de presentacion QR a pantalla completa */
+
+  --color-ink-0: #FFFFFF;  /* Superficie elevada, texto sobre relleno solido */
+  --color-ink-50: #F6F8FB;  /* Canvas de la aplicacion (fondo de pagina) */
+  --color-ink-100: #EDF1F7;  /* Fondo de control deshabilitado, base de skeleton, cabecera de tabla */
+  --color-ink-200: #DDE3EC;  /* border-subtle: divisores DECORATIVOS unicamente */
+  --color-ink-300: #C4CDDA;  /* Pista de barra de progreso, brillo de skeleton */
+  --color-ink-400: #94A1B4;  /* DECORATIVO EN CLARO (2.62:1). Placeholder valido en OSCURO (6.24:1) */
+  --color-ink-500: #697185;  /* Texto terciario / metadatos. 4.88:1 sobre blanco */
+  --color-ink-600: #525B6D;  /* Texto secundario. 6.83:1 sobre blanco */
+  --color-ink-700: #3D4557;  /* Etiquetas de formulario, iconos con significado */
+  --color-ink-800: #2F3745;  /* Texto de cuerpo alternativo. 11.98:1 sobre blanco */
+  --color-ink-900: #151A23;  /* Texto de cuerpo y titulares. 17.44:1 sobre blanco */
+  --color-ink-950: #11151D;  /* Canvas en MODO OSCURO; label de boton primario oscuro */
+
+  --color-success-50: #E8F6EF;
+  --color-success-300: #6FD6A8;  /* Texto de exito en MODO OSCURO (9.23:1) */
+  --color-success-600: #1A8A5A;
+  --color-success-700: #15704A;  /* Texto/relleno de exito en claro. 6.09:1 sobre blanco */
+  --color-danger-50: #FDECEA;
+  --color-danger-300: #F5938C;  /* Texto de error en MODO OSCURO (7.34:1) */
+  --color-danger-600: #D13027;
+  --color-danger-700: #B3261E;  /* Texto/borde de error en claro. 6.54:1 sobre blanco */
+  --color-warning-50: #FEF4E3;
+  --color-warning-300: #F0BE62;  /* Texto de aviso en MODO OSCURO (9.53:1) */
+  --color-warning-600: #A86503;
+  --color-warning-800: #7A4A02;  /* Texto de aviso en claro. 7.48:1 sobre blanco */
+  --color-info-50: #E7F3FA;
+  --color-info-300: #7FC4E8;  /* Texto informativo en MODO OSCURO (8.53:1) */
+  --color-info-600: #1477A8;
+  --color-info-700: #0F5E8C;  /* Texto informativo en claro. 7.00:1 sobre blanco */
+
+  /* Series de gráfico. Regla vinculante: nunca codificar información SOLO por color. */
+  --color-chart-1: #1B3AA8;  /* 9.47:1 */
+  --color-chart-2: #0E7C86;  /* 4.95:1 */
+  --color-chart-3: #A33D9B;  /* 5.68:1 */
+  --color-chart-4: #B3540A;  /* 5.01:1 */
+  --color-chart-5: #4A5BB8;  /* 6.03:1 */
+  --color-chart-6: #15704A;  /* 6.09:1 */
+
+  /* Superficies (modo claro; las *-dark quedan fuera del MVP por D-03) */
+  --color-surface-canvas: #F6F8FB;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-sunken: #EDF1F7;
+  --color-surface-overlay: rgba(21, 26, 35, 0.55);  /* Fondo de modal (scrim) */
+
+  /* Bordes. border-subtle es DECORATIVO: nunca único límite de un control. */
+  --color-border-subtle: #DDE3EC;  /* DECORATIVO. 1.29:1. Nunca como unico limite de un control */
+  --color-border-strong: #78849A;  /* Limite de controles interactivos. 3.77:1 sobre blanco */
+  --color-border-focus: #1B3AA8;  /* 9.47:1 sobre blanco */
+  --color-border-error: #B3261E;
+
+  /* Estados de control */
+  --color-state-disabled-bg: #EDF1F7;
+  --color-state-disabled-fg: #626A79;  /* 4.80:1 sobre disabled-bg. Supera el minimo aunque 1.4.3 exime a los controles deshabilitados */
+  --color-state-placeholder: #616978;  /* 5.53:1 sobre blanco */
+  --color-state-hover-overlay: rgba(21, 26, 35, 0.04);
+  --color-state-press-overlay: rgba(21, 26, 35, 0.08);
+  --color-state-selected-bg: #EEF3FF;
+
+  /* Estado de conexión en tiempo real (siempre con forma + texto, WCAG 1.4.1) */
+  --color-connection-online: #15704A;  /* Conectado. SIEMPRE acompanado de icono + texto */
+  --color-connection-reconnecting: #7A4A02;  /* Reconectando */
+  --color-connection-offline: #B3261E;  /* Desconectado */
+  --color-connection-stale: #697185;  /* Datos obsoletos / sin confirmar */
+
+  /* Badges de estado de encuesta: pares bg/fg verificados en §6.7 */
+  --color-status-draft-bg: #EDF1F7;
+  --color-status-draft-fg: #3D4557;  /* Borrador */
+  --color-status-scheduled-bg: #E7F3FA;
+  --color-status-scheduled-fg: #0F5E8C;  /* Programada */
+  --color-status-active-bg: #E8F6EF;
+  --color-status-active-fg: #15704A;  /* Activa */
+  --color-status-paused-bg: #FEF4E3;
+  --color-status-paused-fg: #7A4A02;  /* Pausada */
+  --color-status-closed-bg: #EEF3FF;
+  --color-status-closed-fg: #1B3AA8;  /* Cerrada */
+  --color-status-archived-bg: #EDF1F7;
+  --color-status-archived-fg: #525B6D;  /* Archivada */
+
+  /* ---------- tipografía ---------- */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;  /* 12px — metadatos, pie de tabla. Nunca para texto esencial en movil */
+  --text-xs--line-height: 1rem;
+  --text-xs--letter-spacing: 0.01em;
+  --text-sm: 0.875rem;  /* 14px — etiquetas, texto de ayuda, celdas de tabla */
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;  /* 16px — cuerpo. MINIMO para inputs en movil: evita el zoom automatico de iOS */
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;  /* 18px — enunciado de pregunta en movil */
+  --text-lg--line-height: 1.75rem;
+  --text-lg--letter-spacing: -0.005em;
+  --text-xl: 1.25rem;  /* 20px — titulo de tarjeta, h3 */
+  --text-xl--line-height: 1.75rem;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 1.5rem;  /* 24px — h2, titulo de pantalla */
+  --text-2xl--line-height: 2rem;
+  --text-2xl--letter-spacing: -0.015em;
+  --text-3xl: 1.875rem;  /* 30px — h1 */
+  --text-3xl--line-height: 2.25rem;
+  --text-3xl--letter-spacing: -0.02em;
+  --text-4xl: 2.25rem;  /* 36px — cifra KPI */
+  --text-4xl--line-height: 2.5rem;
+  --text-4xl--letter-spacing: -0.02em;
+  --text-5xl: 3rem;  /* 48px — codigo en la pantalla de presentacion QR */
+  --text-5xl--line-height: 1;
+  --text-5xl--letter-spacing: -0.025em;
+  --text-6xl: 4.5rem;  /* 72px — contador en proyeccion a sala */
+  --text-6xl--line-height: 1;
+  --text-6xl--letter-spacing: -0.025em;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ---------- radios ---------- */
+  --radius-none: 0;
+  --radius-sm: 0.25rem;  /* 4px — badges, chips */
+  --radius-md: 0.375rem;  /* 6px — inputs, botones. Alineado con rounded-[6px] observado en login.gob.sv */
+  --radius-lg: 0.5rem;  /* 8px — tarjetas, paneles */
+  --radius-xl: 0.75rem;  /* 12px — modales, hoja inferior */
+  --radius-full: 9999px;  /* Avatar, punto de estado de conexion, pildora de progreso */
+
+  /* ---------- sombras (máx. 3 niveles; la elevación por defecto es un borde 1px) ---------- */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px 0 rgba(21, 26, 35, 0.05);  /* Tarjeta en reposo */
+  --shadow-md: 0 2px 6px -1px rgba(21, 26, 35, 0.08), 0 1px 3px -1px rgba(21, 26, 35, 0.06);  /* Menu desplegable, popover */
+  --shadow-lg: 0 8px 24px -4px rgba(21, 26, 35, 0.12), 0 2px 6px -2px rgba(21, 26, 35, 0.06);  /* Modal, hoja inferior */
+  --ring-shadow-focus: 0 0 0 2px #FFFFFF, 0 0 0 4px #1B3AA8;
+  --ring-shadow-focus-error: 0 0 0 2px #FFFFFF, 0 0 0 4px #B3261E;
+
+  /* ---------- breakpoints (mobile-first real: el base es 360px, sin prefijo) ---------- */
+  /* xs 360px: Referencia de diseno base del participante. NO es un prefijo Tailwind */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  /* ---------- contenedores (max-w-*) ---------- */
+  --container-participant: 32rem;  /* 512px. La pagina publica NUNCA se ensancha mas: mantiene longitud de linea legible */
+  --container-admin: 80rem;  /* 1280px */
+  --container-prose: 65ch;
+
+  /* ---------- movimiento ---------- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ease-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/*
+ * Tokens sin namespace propio en Tailwind 4. Se exponen como custom properties
+ * y se consumen desde las clases de componente o con sintaxis arbitraria.
+ */
+:root {
+  /* duraciones de movimiento */
+  --duration-instant: 0ms;
+  --duration-fast: 120ms;  /* Hover, cambio de color */
+  --duration-base: 180ms;  /* Aparicion de toast, apertura de modal */
+  --duration-slow: 320ms;  /* Interpolacion de barra de grafico */
+  --duration-chart: 400ms;  /* Transicion de dato en vivo. Evita saltos bruscos */
+
+  /* objetivos táctiles — el estándar del proyecto es 44px, 48px en el participante */
+  --touch-minimum: 24px;  /* Minimo absoluto WCAG 2.2 AA (2.5.8 Target Size Minimum) */
+  --touch-recommended: 44px;  /* ESTANDAR DEL PROYECTO para toda accion del participante */
+  --touch-comfortable: 48px;  /* Opciones de respuesta y boton de envio */
+
+  /* alturas de control */
+  --control-sm: 2rem;
+  --control-md: 2.5rem;
+  --control-lg: 2.75rem;
+  --control-xl: 3rem;
+
+  /* iconografía */
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --icon-lg: 24px;
+  --icon-xl: 32px;
+
+  /* canalones de rejilla */
+  --gutter-mobile: 1rem;
+  --gutter-tablet: 1.5rem;
+  --gutter-desktop: 2rem;
+
+  /* z-index — escala cerrada, prohibido inventar valores sueltos */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-connectionBanner: 20;
+  --z-dropdown: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  /* anillos de foco (§6.0 · WCAG 2.2 2.4.13) */
+  --ring-focus: 0 0 0 2px #FFFFFF, 0 0 0 4px #1B3AA8;
+  --ring-focus-error: 0 0 0 2px #FFFFFF, 0 0 0 4px #B3261E;
+
+  /* tipografía numérica en vivo: tabular-nums obligatorio */
+  --numeric-features: 'tnum' 1, 'cv05' 1;
+}
