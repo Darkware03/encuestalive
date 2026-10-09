@@ -31,13 +31,38 @@ class ParticipantSession extends Model
     ];
 
     /**
-     * ADR-0004. El PRD §8.1 propuso 20 s / 60 s y ADR-0004 fijo 15 s / 45 s;
-     * prevalece el ADR (documento de arquitectura, orden de lectura 2 frente a 3).
-     * Ambos valores son configurables y NO afectan al esquema: "conectada" se
-     * deriva de last_seen_at en cada consulta, no hay contador almacenado.
+     * Presencia. DATABASE.md §10.3 dejo esta discrepancia abierta (ADR-0004
+     * proponia 15/45, el PRD §8.1 proponia 20/60) y pidio a darkware que la
+     * resolviera.
+     *
+     * RESUELTA POR D-12, vinculante: GANA EL PRD, 20 s de renovacion y 60 s de
+     * expiracion. Motivo registrado: el participante tipico esta en un evento
+     * con datos moviles saturados; una ventana de 45 s declara "desconectado" a
+     * quien solo tuvo un bache de red e infla la metrica de pendientes.
+     *
+     * Estas constantes son el VALOR POR DEFECTO. La fuente operativa es
+     * config/encuestalive.php, para que el plazo se ajuste sin tocar codigo.
+     * No afectan al esquema: "conectada" se deriva de last_seen_at en cada
+     * consulta y no hay contador almacenado.
      */
-    public const HEARTBEAT_INTERVAL_SECONDS = 15;
-    public const EXPIRY_WINDOW_SECONDS = 45;
+    public const HEARTBEAT_INTERVAL_SECONDS = 20;
+    public const EXPIRY_WINDOW_SECONDS = 60;
+
+    public static function heartbeatIntervalSeconds(): int
+    {
+        return (int) config(
+            'encuestalive.presence.heartbeat_interval_seconds',
+            self::HEARTBEAT_INTERVAL_SECONDS,
+        );
+    }
+
+    public static function expiryWindowSeconds(): int
+    {
+        return (int) config(
+            'encuestalive.presence.expiry_window_seconds',
+            self::EXPIRY_WINDOW_SECONDS,
+        );
+    }
 
     protected $fillable = [
         'survey_id',
@@ -87,7 +112,7 @@ class ParticipantSession extends Model
     {
         $threshold = \Illuminate\Support\Carbon::instance(
             $now ? \Illuminate\Support\Carbon::instance($now) : now()
-        )->subSeconds(self::EXPIRY_WINDOW_SECONDS);
+        )->subSeconds(self::expiryWindowSeconds());
 
         return $query->where('last_seen_at', '>', $threshold);
     }
@@ -132,6 +157,6 @@ class ParticipantSession extends Model
         $now = $now ? \Illuminate\Support\Carbon::instance($now) : now();
 
         return $this->last_seen_at !== null
-            && $this->last_seen_at->gt($now->copy()->subSeconds(self::EXPIRY_WINDOW_SECONDS));
+            && $this->last_seen_at->gt($now->copy()->subSeconds(self::expiryWindowSeconds()));
     }
 }
