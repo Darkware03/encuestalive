@@ -37,23 +37,30 @@ class PrivacySeparationTest extends TestCase
     private const ISLAND_B = ['security_events'];
 
     /**
-     * HALLAZGO DECLARADO (Fase 4). `sessions` es la tabla DEL FRAMEWORK que usa
-     * el driver de sesion de Laravel, no una tabla del modelo de EncuestaLive.
-     * Con SESSION_DRIVER=database (valor actual de .env y .env.example) guarda
-     * `ip_address` y `user_agent` de CUALQUIER visitante con cookie de sesion,
-     * incluidos los participantes anonimos.
+     * HALLAZGO CERRADO EN LA FASE 7b (F-H1). Antes valia `['sessions']`.
      *
-     * No crea un puente respuesta<->IP: `sessions.id` es el identificador de
-     * sesion de Laravel, no tiene relacion alguna con `participant_sessions`,
-     * y no existe columna compartida por la que unirlas (lo verifica
-     * test_framework_sessions_table_cannot_be_joined_to_participation_data).
-     * Pero SI es un segundo almacen de IP que ARCHITECTURE.md §7 no contemplo.
+     * `sessions` es la tabla DEL FRAMEWORK que usa el driver de sesion de
+     * Laravel, no una tabla del modelo de EncuestaLive. De fabrica traia
+     * `ip_address` y `user_agent`, de modo que con SESSION_DRIVER=database
+     * habria guardado la IP de CUALQUIER visitante, participantes anonimos
+     * incluidos: un SEGUNDO almacen de direcciones IP.
      *
-     * Mitigacion recomendada, FUERA del ambito de escritura de la Fase 4:
-     * SESSION_DRIVER=file (o cookie) en .env y .env.example. Reportado a
-     * darkware y a devops-release; ver DATABASE.md §9.
+     * La Fase 4 lo reporto y D-11 lo mitigo fijando SESSION_DRIVER=file. Pero
+     * esa mitigacion dependia de UNA VARIABLE DE ENTORNO, y `database` es
+     * ademas el valor por defecto de config/session.php: un operador podia
+     * reintroducir el almacen sin sospecharlo y sin que nada fallara.
+     *
+     * La Fase 7b ELIMINA las dos columnas de la migracion. La propiedad deja
+     * de depender de la configuracion y pasa a ser estructural, que es el
+     * mismo criterio aplicado a la isla A: el dato no se guarda porque no hay
+     * donde guardarlo. AppServiceProvider avisa ademas si alguien configura el
+     * driver `database`, para que el fallo explique la regla en vez de dar un
+     * error SQL criptico.
+     *
+     * Esta lista VACIA es la afirmacion fuerte: `ip_address` existe en
+     * EXACTAMENTE una tabla de todo el esquema, `security_events`.
      */
-    private const FRAMEWORK_TABLES_WITH_IP = ['sessions'];
+    private const FRAMEWORK_TABLES_WITH_IP = [];
 
     /** Cualquier nombre de columna que huela a identificador de red o dispositivo. */
     private const NETWORK_COLUMN_PATTERNS = [
@@ -121,9 +128,10 @@ class PrivacySeparationTest extends TestCase
         $this->assertSame(
             $expected,
             $actual,
-            'Ninguna tabla del modelo de EncuestaLive, salvo security_events, puede '
-            .'almacenar direcciones IP. `sessions` es la tabla del framework y es un '
-            .'hallazgo declarado (ver DATABASE.md §9), no una tabla de participacion.'
+            'Ninguna tabla del esquema, salvo security_events, puede almacenar '
+            .'direcciones IP. Desde la Fase 7b esto incluye a `sessions`, la tabla del '
+            .'framework: sus columnas ip_address/user_agent se eliminaron para que la '
+            .'regla no dependa de SESSION_DRIVER (hallazgo F-H1).'
         );
     }
 
@@ -259,11 +267,30 @@ class PrivacySeparationTest extends TestCase
 
         $securityColumns = Schema::getColumnListing('security_events');
 
+        /*
+         * ACTUALIZADO EN LA FASE 7b (hallazgo F-01).
+         *
+         * Esta lista permitida incluia `created_at` y `updated_at`, porque la
+         * isla B los tenia. Eran precisamente el defecto: en la misma fila
+         * cuyo `occurred_at` se trunca al minuto, Eloquent escribia la marca
+         * al SEGUNDO, y un JOIN por ventana de +-2 s contra
+         * `responses.completed_at` devolvia candidatos respuesta<->IP.
+         *
+         * Al eliminarlos (migracion 2026_10_10_090000), la interseccion se
+         * REDUCE: la propiedad de privacidad es ahora estrictamente mas
+         * fuerte, no mas debil. La prueba fallaba por tener la lista vieja.
+         *
+         * Queda compartido `id`, que es el canal lateral de ordenacion que el
+         * informe documenta como F-02 y que se acepta como riesgo residual:
+         * eliminarlo exigiria una clave primaria UUIDv4 y degradaria los
+         * indices. El control que de verdad lo acota es la purga de 30 dias
+         * (D-12), ya programada tras corregir F-13.
+         */
         foreach (['responses', 'response_answers', 'response_selections', 'participant_sessions'] as $table) {
             $shared = array_values(array_intersect(Schema::getColumnListing($table), $securityColumns));
 
             sort($shared);
-            $allowed = ['created_at', 'id', 'updated_at'];
+            $allowed = ['id'];
             if ($table === 'responses' || $table === 'participant_sessions') {
                 $allowed[] = 'survey_id';   // entero suelto en la isla B, sin FK
                 sort($allowed);
@@ -272,8 +299,26 @@ class PrivacySeparationTest extends TestCase
             $this->assertSame(
                 $allowed,
                 $shared,
-                "Aparecio una columna nueva compartida entre {$table} y security_events."
+                "Cambio el conjunto de columnas compartidas entre {$table} y security_events."
             );
+
+            /*
+             * Y lo que de verdad cierra F-01: NINGUNA columna temporal puede
+             * ser comun a las dos islas. Mientras lo fuera, existiria un JOIN
+             * por tiempo que escribir.
+             */
+            $sharedTemporal = array_values(array_filter(
+                $shared,
+                fn (string $column): bool => str_ends_with($column, '_at'),
+            ));
+
+            $this->assertSame([], $sharedTemporal, sprintf(
+                '%s y security_events comparten columnas temporales (%s). Eso permite '
+                .'un JOIN por ventana de tiempo entre la isla A y la unica tabla con '
+                .'direcciones IP (F-01).',
+                $table,
+                implode(', ', $sharedTemporal),
+            ));
         }
 
         // `survey_id` permite saber que hubo abuso CONTRA una encuesta, nunca

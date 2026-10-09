@@ -60,6 +60,21 @@ return new class extends Migration
             // ENTERO SUELTO A PROPOSITO. Sin ->constrained(): sin puente entre islas.
             $table->unsignedBigInteger('survey_id')->nullable();
 
+            /*
+             * F-01 (ALTO, Fase 7). Esta llamada a `$table->timestamps()`
+             * escribia `created_at` con precision de SEGUNDO en la misma fila
+             * cuyo `occurred_at` se trunca al MINUTO, anulando la mitigacion
+             * de correlacion temporal de ARCHITECTURE.md §7.3.
+             *
+             * Las columnas se ELIMINAN en la migracion
+             * 2026_10_10_090000_drop_timestamps_from_security_events_table.
+             * Esta linea se conserva (en lugar de borrarla) para que la
+             * historia de migraciones siga siendo fiel a lo que se aplico en
+             * las bases de datos ya desplegadas; la correccion es la migracion
+             * posterior, no una reescritura del pasado.
+             *
+             * NO anadir aqui ninguna columna temporal nueva.
+             */
             $table->timestamps();
 
             // Purga por retencion (SECURITY_LOG_RETENTION_DAYS, 30 por defecto).

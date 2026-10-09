@@ -69,6 +69,21 @@ class SecurityEvent extends Model
     /** La IP nunca debe viajar en una serializacion accidental (CA-11). */
     protected $hidden = ['ip_address'];
 
+    /**
+     * F-01 (ALTO, Fase 7): SIN created_at / updated_at.
+     *
+     * Eloquent las escribia con precision de SEGUNDO en la misma fila cuyo
+     * `occurred_at` se trunca al MINUTO, anulando por completo la mitigacion
+     * de correlacion temporal de ARCHITECTURE.md §7.3. Las columnas se
+     * eliminaron de la tabla (migracion 2026_10_10_090000) y aqui se desactiva
+     * su mantenimiento.
+     *
+     * NO VOLVER A ACTIVARLAS. `occurred_at` es la unica marca temporal
+     * legitima de esta tabla, y un evento de seguridad es inmutable: nunca se
+     * actualiza, de modo que `updated_at` no tendria ni significado.
+     */
+    public $timestamps = false;
+
     /** Administrador autenticado, nunca un participante anonimo. */
     public function user(): BelongsTo
     {
