@@ -3,13 +3,26 @@
      * P10/P11 · Dashboard de resultados en vivo y feed de texto libre.
      *
      * ============ EL SONDEO ES EL RESPALDO OBLIGATORIO (D-02) ============
-     * `wire:poll` se pinta SIEMPRE que la conexion no sea `connected`. No es
-     * una opcion de configuracion: es lo que garantiza CA-08 si Reverb no
-     * arranca en el entorno de destino.
+     * `wire:poll` se pinta SIEMPRE. Sin condicion, sin excepcion, sea cual
+     * sea el estado de la conexion. No es una opcion de configuracion: es lo
+     * que garantiza CA-08 aunque Reverb no arranque, se caiga a mitad o
+     * conecte pero deje de entregar frames en silencio.
      *
-     *   connected    -> sin sondeo, manda el WebSocket
+     *   connected    -> cada 15 s, sondeo ESPACIADO (red de seguridad)
      *   reconnecting -> cada 10 s, para que no se congele durante el corte
      *   degraded     -> cada 5 s, permanente
+     *
+     * ---------------------- DEF-01, FASE 6b ----------------------
+     * ANTES esta linea era `@if ($pollInterval) wire:poll... @endif` y
+     * `pollInterval()` devolvia null en `connected`. Resultado: en cuanto el
+     * WebSocket abria, el atributo DESAPARECIA del DOM y, como Livewire
+     * 4.4.7 no tiene puente con Echo, el dashboard quedaba congelado
+     * mostrando "Conectado · en vivo". Solo funcionaba con Reverb caido.
+     *
+     * El `@if` se ha eliminado por completo —no solo cambiado el valor—
+     * para que no exista NINGUNA rama de esta plantilla capaz de dejar el
+     * dashboard sin sondeo. Reverb acelera; el sondeo no se negocia.
+     * -------------------------------------------------------------
      *
      * El valor inicial del componente es `degraded`, a proposito: hasta que
      * el JS de Echo confirme que hay socket, el dashboard se comporta como si
@@ -24,9 +37,11 @@
 @endphp
 
 <div
-    @if ($pollInterval) wire:poll.{{ $pollInterval }}="refreshStats" @endif
+    wire:poll.{{ $pollInterval }}="refreshStats"
     data-dashboard
     data-public-id="{{ $survey->public_id }}"
+    data-connection-state="{{ $connectionState }}"
+    data-poll-interval="{{ $pollInterval }}"
 >
     <x-slot:title>{{ $survey->title }}</x-slot:title>
 
@@ -66,7 +81,13 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-4">
+            {{-- managed="livewire": lo pinta el servidor en cada render y el
+                 JS tiene PROHIBIDO tocarlo. Es la mitad de la correccion de
+                 DEF-04: antes el JS le reescribia `data-connection` mientras
+                 Livewire conservaba clase y texto del estado anterior, y el
+                 indicador se contradecia a si mismo durante ~3 s. --}}
             <x-connection-indicator
+                managed="livewire"
                 :state="$this->indicatorState()"
                 :detail="$this->indicatorDetail()"
             />

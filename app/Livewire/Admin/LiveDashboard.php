@@ -7,7 +7,6 @@ use App\Models\Survey;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Carbon;
 use Livewire\Attributes\Layout;
-use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
@@ -28,10 +27,22 @@ use Livewire\Component;
  *     devuelva el valor correcto sin reproducir ningun evento (CA-15).
  * ==================================================================
  *
- * MODELO DE SONDEO (ADR-0002, §8.2):
- *   connected    -> sin sondeo (manda el WebSocket)
+ * MODELO DE SONDEO (ADR-0002 §8.2, CORREGIDO EN FASE 6b POR DEF-01):
+ *   connected    -> wire:poll.15s  (sondeo ESPACIADO, nunca apagado)
  *   reconnecting -> wire:poll.10s, para que no se congele durante el corte
  *   degraded     -> wire:poll.5s PERMANENTE, el respaldo obligatorio de D-02
+ *
+ * ============ DEF-01: POR QUE `connected` YA NO ES `null` ============
+ * La version anterior devolvia null en `connected`, lo que borraba
+ * `wire:poll` del DOM. Como Livewire 4.4.7 NO trae puente con Echo, el
+ * dashboard quedaba congelado mostrando "Conectado · en vivo" y solo se
+ * actualizaba con Reverb CAIDO. Se violaba la regla dura de D-02.
+ *
+ * Ahora el sondeo es un SUELO que nunca se retira. Reverb ACELERA el
+ * refresco (el puente de `realtime.js` llama a `onStatsUpdated` en cuanto
+ * llega el frame), pero si la difusion falla en silencio lo peor que ocurre
+ * es 15 s de latencia, no una pantalla muerta.
+ * =====================================================================
  */
 class LiveDashboard extends Component
 {
@@ -72,16 +83,33 @@ class LiveDashboard extends Component
     /**
      * Llega un `stats.updated` por el canal privado.
      *
+     * ============ DEF-01: COMO SE INVOCA ESTE METODO ============
+     * ANTES llevaba el atributo
+     *   #[On('echo-private:survey.{survey.public_id}.admin,stats.updated')]
+     * que era CODIGO MUERTO: livewire/livewire 4.4.7 no interpreta el prefijo
+     * `echo-private:` (verificado, 0 apariciones en su src/ y su dist/; la
+     * unica funcion relacionada es SupportPolling). Registraba un oyente para
+     * un nombre de evento literal que nada emitia jamas.
+     *
+     * Se ha ELIMINADO el atributo en lugar de dejarlo "por si acaso": codigo
+     * que aparenta funcionar y no hace nada es peor que no tenerlo, porque
+     * costo una fase entera de QA descubrir que no se disparaba.
+     *
+     * El puente REAL vive ahora en `resources/js/realtime.js`, que se
+     * suscribe con Echo a `private-survey.{publicId}.admin`, escucha
+     * `.stats.updated` (con punto inicial: el evento usa broadcastAs()) y
+     * llama explicitamente a este metodo por `Livewire.find(id).call(...)`.
+     * ============================================================
+     *
      * `$payload` se recibe y SE IGNORA DELIBERADAMENTE. Es una senal de
      * "algo cambio, vuelve a mirar", no un dato que pintar.
      */
-    #[On('echo-private:survey.{survey.public_id}.admin,stats.updated')]
     public function onStatsUpdated(array $payload = []): void
     {
         $this->refreshStats();
     }
 
-    #[On('echo-private:survey.{survey.public_id}.admin,text.received')]
+    /** Igual que `onStatsUpdated`: lo invoca el puente de `realtime.js`. */
     public function onTextReceived(array $payload = []): void
     {
         // Tampoco se antepone el texto del payload al feed: se reconsulta.
@@ -121,11 +149,20 @@ class LiveDashboard extends Component
         $this->lastUpdatedAt = Carbon::now()->format('H:i:s');
     }
 
-    /** Intervalo de sondeo segun el estado de conexion (ADR-0002 §8.2). */
-    public function pollInterval(): ?string
+    /**
+     * Intervalo de sondeo segun el estado de conexion (ADR-0002 §8.2).
+     *
+     * CONTRATO DURO (D-02, reforzado tras DEF-01): el tipo de retorno es
+     * `string`, NO `?string`. Es imposible, por construccion, que este metodo
+     * apague el respaldo. Si algun dia alguien anade un estado nuevo, el
+     * `default` lo manda al sondeo mas agresivo (5 s), que es el lado seguro
+     * del error: refrescar de mas nunca rompe nada, refrescar de menos deja
+     * un dashboard mintiendo.
+     */
+    public function pollInterval(): string
     {
         return match ($this->connectionState) {
-            'connected' => null,
+            'connected' => (string) config('encuestalive.realtime.poll_connected'),
             'reconnecting' => (string) config('encuestalive.realtime.poll_reconnecting'),
             default => (string) config('encuestalive.realtime.poll_degraded'),
         };
@@ -144,6 +181,7 @@ class LiveDashboard extends Component
     public function indicatorDetail(): string
     {
         return match ($this->connectionState) {
+            // Honesto en los dos sentidos: hay socket Y hay red de seguridad.
             'connected' => 'en vivo',
             'reconnecting' => 'reconectando…',
             // Texto HONESTO: no se promete tiempo real si no lo hay.
