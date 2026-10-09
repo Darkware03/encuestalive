@@ -129,10 +129,38 @@ return [
     |
     */
     'realtime' => [
-        // Respaldo permanente en estado `degraded` (ADR-0002).
-        'poll_degraded' => env('REALTIME_POLL_DEGRADED', '5s'),
+        /*
+        |----------------------------------------------------------------------
+        | EL SUELO DE SONDEO (DEF-01, Fase 6b) — NUNCA null
+        |----------------------------------------------------------------------
+        |
+        | Hasta la Fase 6b el estado `connected` devolvia null y el atributo
+        | `wire:poll` DESAPARECIA del DOM. Combinado con que livewire/livewire
+        | 4.4.7 no trae puente con Echo (verificado: 0 apariciones de
+        | "echo-private" en vendor/livewire/livewire/src y /dist), el resultado
+        | era un dashboard CONGELADO que mostraba "Conectado · en vivo". El
+        | sistema solo se actualizaba cuando Reverb estaba CAIDO: el
+        | comportamiento exactamente inverso al deseado.
+        |
+        | D-02 es una regla dura: "se mantiene OBLIGATORIO el respaldo
+        | wire:poll; no es opcional" y "un fallo de difusion JAMAS puede
+        | degradar el servicio". Un respaldo que se apaga cuando el primario
+        | parece sano no es un respaldo: es una averia silenciosa, peor que no
+        | tener tiempo real, porque la pantalla miente.
+        |
+        | PRINCIPIO INNEGOCIABLE: Reverb solo puede ACELERAR el refresco, jamas
+        | sustituirlo ni apagarlo. Por eso los tres estados tienen intervalo y
+        | NINGUNO puede ser null. Con socket sano el sondeo se ESPACIA a 15 s
+        | —red de seguridad barata: 4 peticiones/minuto por admin— en lugar de
+        | desaparecer. Asi un fallo de difusion se convierte en una
+        | degradacion imperceptible (15 s de latencia) y no en un dashboard
+        | muerto.
+        */
+        'poll_connected' => env('REALTIME_POLL_CONNECTED', '15s'),
         // Durante un corte, para que el dashboard no se congele.
         'poll_reconnecting' => env('REALTIME_POLL_RECONNECTING', '10s'),
+        // Respaldo permanente en estado `degraded` (ADR-0002).
+        'poll_degraded' => env('REALTIME_POLL_DEGRADED', '5s'),
     ],
 
     /*

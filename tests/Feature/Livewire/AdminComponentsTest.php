@@ -263,10 +263,23 @@ class AdminComponentsTest extends TestCase
         $component = Livewire::actingAs($owner)
             ->test(LiveDashboard::class, ['survey' => $built['survey']]);
 
-        // Conectado: manda el WebSocket, el sondeo se APAGA.
+        // Conectado: Reverb acelera el refresco, pero el sondeo NUNCA se apaga.
+        //
+        // DEF-01 (critico, Fase 6). Esta prueba afirmaba antes lo contrario
+        // (`assertDontSeeHtml('wire:poll')`), y por eso la suite daba verde
+        // sobre un dashboard que se congelaba justo cuando Reverb funcionaba:
+        // al pasar a `connected`, `pollInterval()` devolvia null, el atributo
+        // desaparecia del DOM y, como Livewire 4.4.7 no tiene puente con Echo,
+        // ya nada volvia a refrescar la pantalla. El comportamiento era el
+        // inverso del deseado: solo se actualizaba con Reverb CAIDO.
+        //
+        // La regla de D-02 es innegociable: el sondeo es un SUELO permanente.
+        // El WebSocket solo puede espaciarlo, jamas sustituirlo ni apagarlo.
+        // Asi un fallo de difusion degrada el refresco a 15 s en vez de
+        // romperlo en silencio.
         $component->call('setConnectionState', 'connected')
             ->assertSet('connectionState', 'connected')
-            ->assertDontSeeHtml('wire:poll');
+            ->assertSeeHtml('wire:poll.15s');
 
         // Reconectando: 10 s, para que no se congele durante el corte.
         $component->call('setConnectionState', 'reconnecting')
