@@ -39,6 +39,39 @@ class SecurityEvent extends Model
 
     protected $keyType = 'string';
 
+    /**
+     * UUID **v4** (aleatorio), explicitamente. NO v7.
+     *
+     * ===================== POR QUE ESTO NO ES OPCIONAL =====================
+     *
+     * `HasUuids` en Laravel 13.35.0 devuelve `Str::uuid7()`, y **UUIDv7 lleva
+     * 48 bits de marca de tiempo Unix en milisegundos, EN CLARO**, en los
+     * primeros 12 digitos hexadecimales. Es decodificable con una linea:
+     *
+     *     id          = 01a1237a-17af-72ca-8da4-24cf38f79b46
+     *     ts embebido = 2026-10-10 01:42:46.447
+     *
+     * La primera correccion de F-02 cayo exactamente en esa trampa: se quito
+     * `created_at` por delatar el SEGUNDO y se introdujo una clave primaria
+     * que delata el MILISEGUNDO. Peor aun, convirtio un ataque ACTIVO y
+     * ruidoso (sembrar marcas propias para acotar por orden) en uno PASIVO:
+     * basta leer el identificador, sin trafico y sin dejar rastro.
+     *
+     * El fallo de metodo que lo permitio: la migracion rellena las filas
+     * antiguas con `Str::uuid()` (v4 de verdad), asi que la comprobacion se
+     * hizo sobre datos migrados y no sobre el camino de produccion. Se validó
+     * el escenario, no la propiedad.
+     *
+     * v4 es aleatorio: no codifica instante alguno y no es ordenable por
+     * tiempo. Se pierde la localidad de indice de v7, lo cual es irrelevante
+     * en una tabla que se escribe de forma esporadica y se purga a los 30
+     * dias (D-12).
+     */
+    public function newUniqueId(): string
+    {
+        return (string) \Illuminate\Support\Str::uuid();
+    }
+
     public const TYPE_RATE_LIMITED = 'rate_limited';
     public const TYPE_AUTH_FAILED = 'auth_failed';
     public const TYPE_INVALID_PUBLIC_ID = 'invalid_public_id';

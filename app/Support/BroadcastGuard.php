@@ -63,7 +63,13 @@ final class BroadcastGuard
     /** Un difusor sin autorizacion de canal. */
     public static function disablesChannelAuthorization(?string $driver): bool
     {
-        return in_array((string) $driver, self::UNAUTHORIZING_DRIVERS, true);
+        // Normalizado antes de comparar (F-16, segunda pasada del retest).
+        // `in_array(..., true)` distingue mayusculas, pero PHP resuelve los
+        // nombres de clase sin distinguirlas: `log` bloqueaba el arranque
+        // mientras que `LOG`, `Log` o `Null` lo permitian **en silencio** y
+        // seguian cargando LogBroadcaster. La comparacion debe ser tan
+        // indulgente como lo es el lenguaje que la rodea.
+        return in_array(mb_strtolower(trim((string) $driver)), self::UNAUTHORIZING_DRIVERS, true);
     }
 
     /**
