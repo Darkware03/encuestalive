@@ -23,6 +23,22 @@ class SecurityEvent extends Model
     /** @use HasFactory<SecurityEventFactory> */
     use HasFactory;
 
+    /**
+     * Clave primaria UUIDv4, no autoincremental (hallazgo F-02).
+     *
+     * Un contador monotono no guarda una hora, pero guarda un ORDEN, y con dos
+     * marcas propias a hora conocida ese orden se convierte en un reloj: el
+     * auditor estrecho una ventana declarada de 60 s hasta 0,254 s reales y
+     * señalo una respuesta concreta. Un identificador aleatorio elimina ese
+     * canal; la unica senal temporal que queda es `occurred_at`, truncado al
+     * minuto a proposito.
+     */
+    use \Illuminate\Database\Eloquent\Concerns\HasUuids;
+
+    public $incrementing = false;
+
+    protected $keyType = 'string';
+
     public const TYPE_RATE_LIMITED = 'rate_limited';
     public const TYPE_AUTH_FAILED = 'auth_failed';
     public const TYPE_INVALID_PUBLIC_ID = 'invalid_public_id';

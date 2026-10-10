@@ -66,10 +66,31 @@ final class BroadcastGuard
         return in_array((string) $driver, self::UNAUTHORIZING_DRIVERS, true);
     }
 
-    /** El difusor configurado ahora mismo. */
+    /**
+     * El DRIVER del difusor configurado ahora mismo.
+     *
+     * F-16 (regresion detectada en el retest de la Fase 7c). Esto devolvia
+     * `config('broadcasting.default')`, que es el NOMBRE de la conexion, no su
+     * driver. La comprobacion contrastaba ese nombre contra una lista de
+     * DRIVERS, asi que bastaba con bautizar la conexion de otra forma para
+     * burlar la guarda entera:
+     *
+     *     'realtime-off' => ['driver' => 'log']
+     *
+     * Con eso la aplicacion arrancaba en produccion sin una sola protesta y
+     * cualquier anonimo quedaba AUTORIZADO en los canales privados: F-07
+     * reabierto por una puerta lateral.
+     *
+     * Ahora se resuelve el driver real. Si la conexion no existe en
+     * `broadcasting.connections`, se devuelve el propio nombre: asi una
+     * configuracion rota se compara contra la lista en vez de colarse por el
+     * hueco. Ante la duda, ruidoso antes que permisivo.
+     */
     public static function current(): string
     {
-        return (string) config('broadcasting.default');
+        $connection = (string) config('broadcasting.default');
+
+        return (string) config("broadcasting.connections.{$connection}.driver", $connection);
     }
 
     /**
