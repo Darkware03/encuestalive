@@ -29,24 +29,30 @@ import {
  * latencia).
  *
  * ---------------------------------------------------------------------------
- * ADVERTENCIA IMPORTANTE SOBRE EL ENTORNO DE ESTAS PRUEBAS
+ * ACTUALIZACION FASE 6d — EL BLOQUEO DEL SONDEO YA NO ES TEORICO
  * ---------------------------------------------------------------------------
- * Se ha medido que, con la CSP de la Fase 7b (`script-src 'self'`, sin
- * 'unsafe-eval'), el sondeo `wire:poll` NO SE EJECUTA: el temporizador salta
- * pero Livewire evalua la expresion con `new Function()` y la CSP lo impide.
- * Eso es DEF-05 y se prueba en `ca08-fallback.spec.mjs`.
+ * En la Fase 6c se midio que, con la CSP de la Fase 7b (`script-src 'self'`,
+ * sin 'unsafe-eval'), el sondeo `wire:poll` NO SE EJECUTABA: el temporizador
+ * saltaba pero Livewire evaluaba la expresion con `new Function()` y la CSP lo
+ * impedia. Eso fue DEF-05.
  *
- * Esa averia NO se aprovecha aqui como atajo. El bloqueo activo del sondeo se
- * aplica igualmente, para que el dia que DEF-05 se corrija estas pruebas
- * sigan distinguiendo las dos vias en lugar de pasar por inercia.
+ * DEF-05 esta CORREGIDO (`config/livewire.php: csp_safe => true`) y verificado
+ * en la Fase 6d: el sondeo vuelve a emitir peticiones de verdad.
+ *
+ * Eso tiene una consecuencia DIRECTA sobre este fichero: hasta ahora el
+ * control de exclusion `bloquearSondeo()` no abortaba nada, porque no habia
+ * nada que abortar, y la atribucion al WebSocket se sostenia sola. Ahora el
+ * sondeo SI compite, el bloqueo SI ejerce, y estas pruebas pasan a medir lo
+ * que siempre dijeron medir en lugar de pasar por inercia. Era exactamente el
+ * motivo por el que el control se dejo escrito estando el defecto abierto.
  * ---------------------------------------------------------------------------
  */
 
 const fx = loadFixture();
 const survey = fx.surveys.active;
 
-const SHOTS = resolve(ROOT, 'storage/app/screenshots/f6c');
-const DATOS = resolve(ROOT, 'storage/app/f6c');
+const SHOTS = resolve(ROOT, 'storage/app/screenshots/f6d');
+const DATOS = resolve(ROOT, 'storage/app/f6d');
 mkdirSync(SHOTS, { recursive: true });
 mkdirSync(DATOS, { recursive: true });
 
@@ -137,9 +143,11 @@ test('CA-08.2 · EL PASO 5: el dashboard se refresca por el WEBSOCKET, no por el
         latencia_ms: latencia,
         suelo_sondeo_ms: 15_000,
         peticiones_tras_envio: obs.resumen(marca),
-        sondeos_observados: obs.sondeos(marca),
+        sondeos_intentados: obs.sondeos(marca),
+        sondeos_que_llegaron_al_servidor: obs.sondeosServidos(marca),
         sondeos_bloqueados: bloqueo.total(),
         puentes_observados: obs.puentes(marca),
+        puentes_que_llegaron_al_servidor: obs.puentesServidos(marca),
         frames_stats_updated: obs.framesStats(),
         errores_csp: obs.erroresCsp.length,
     };
@@ -150,11 +158,12 @@ test('CA-08.2 · EL PASO 5: el dashboard se refresca por el WEBSOCKET, no por el
     expect(cambio.cambio, 'el contador debe subir sin recargar').toBeTruthy();
     expect(Number(cambio.valor)).toBe(Number(antes) + 1);
 
-    // 2. ATRIBUCION POSITIVA: lo pidio el puente del WebSocket.
-    expect(obs.puentes(marca), 'debe observarse una llamada onStatsUpdated').toBeGreaterThan(0);
+    // 2. ATRIBUCION POSITIVA: lo pidio el puente del WebSocket, y LLEGO.
+    expect(obs.puentesServidos(marca), 'debe observarse una llamada onStatsUpdated servida').toBeGreaterThan(0);
 
-    // 3. EXCLUSION: ningun sondeo llego al servidor.
-    expect(obs.sondeos(marca), 'ningun refreshStats debe haber llegado al servidor').toBe(0);
+    // 3. EXCLUSION: ningun sondeo llego al servidor (intentarlo no basta: ver
+    //    la nota sobre `request` vs `response` en support/realtime.mjs).
+    expect(obs.sondeosServidos(marca), 'ningun refreshStats debe haber LLEGADO al servidor').toBe(0);
 
     // 4. LATENCIA: imposible de explicar por un sondeo de 15 s.
     expect(latencia, `latencia ${latencia} ms debe ser muy inferior al suelo de 15 s`).toBeLessThan(10_000);
@@ -163,6 +172,44 @@ test('CA-08.2 · EL PASO 5: el dashboard se refresca por el WEBSOCKET, no por el
     expect(navs(), 'el dashboard no debe haberse recargado').toBe(navsAntes);
 
     await page.screenshot({ path: resolve(SHOTS, 'ca08-02-refrescado-por-websocket.png'), fullPage: true });
+
+    /*
+     * ------------------------------------------------------------------
+     * 6. COMPROBACION DE QUE EL CONTROL DE EXCLUSION EJERCE DE VERDAD
+     * ------------------------------------------------------------------
+     * Con DEF-05 abierto, `sondeos_bloqueados` era 0 porque el sondeo ni lo
+     * intentaba: la exclusion no probaba nada y el aprobado salia gratis.
+     * Corregido DEF-05, el bloqueo DEBE abortar algo.
+     *
+     * Pero esa comprobacion no se puede hacer en el instante en que termina
+     * la medicion anterior, y aqui me equivoque en el primer intento de esta
+     * fase: el WebSocket resuelve en ~400 ms, asi que la prueba llegaba a
+     * esta linea unos 3 s despues de cargar la pagina, ANTES de que hubiera
+     * podido saltar ningun tic de 5 s. El resultado era un fallo que no
+     * denunciaba nada del producto, solo una ventana de observacion mas
+     * corta que el periodo de lo que se queria observar.
+     *
+     * Se mide, por tanto, dejando pasar una ventana mayor que el intervalo
+     * declarado. No se relaja el control: se le da tiempo a ejercer.
+     */
+    const VENTANA_TIC_MS = 17_000;   // > 15 s del suelo, y muy > 5 s inicial
+    await page.waitForTimeout(VENTANA_TIC_MS);
+
+    console.log('[CA-08.2] tras %d ms: intentados=%d  abortados=%d  llegaron al servidor=%d',
+        VENTANA_TIC_MS, obs.sondeos(marca), bloqueo.total(), obs.sondeosServidos(marca));
+
+    expect(bloqueo.total(),
+        `en ${VENTANA_TIC_MS} ms el sondeo debe haber intentado al menos una peticion y haber sido abortada`)
+        .toBeGreaterThan(0);
+
+    /*
+     * Y la exclusion se sostiene: hubo intentos, pero NINGUNO llego. Esta es
+     * la linea que de verdad sostiene la atribucion al WebSocket, y solo
+     * significa algo porque la de arriba demuestra que hubo intentos que
+     * abortar.
+     */
+    expect(obs.sondeosServidos(marca),
+        'pese a los intentos, ningun refreshStats debe haber llegado al servidor').toBe(0);
     await api.dispose();
     await ctx.close();
 });

@@ -26,9 +26,14 @@ import { observarDashboard, leerDom, enviarRespuesta, esperarCambio, reverbVivo 
  *   b) la RECUPERACION EFECTIVA: tras la caida, el dashboard vuelve a
  *      refrescarse de verdad.                                -> DEF-05
  *
- * Que (a) pase y (b) falle es precisamente el hallazgo de la fase: el sistema
- * REACCIONA bien y no SIRVE de nada, porque el sondeo al que recurre no se
- * ejecuta bajo la CSP vigente.
+ * En la Fase 6c (a) pasaba y (b) fallaba, y ese fue el hallazgo: el sistema
+ * REACCIONABA bien y no SERVIA de nada, porque el sondeo al que recurria no se
+ * ejecutaba bajo la CSP vigente.
+ *
+ * FASE 6d: DEF-05 corregido (`csp_safe => true`). Se exige que (b) TAMBIEN
+ * pase, y la anotacion `test.fail()` de CA-08.6b se retira. La exigencia de
+ * ATRIBUCION POSITIVA al sondeo se conserva intacta: es lo unico que impide
+ * que la prueba vuelva a pasar por el rebote de `setConnectionState`.
  *
  * ----------------------------- AISLAMIENTO -----------------------------
  * Esta prueba MATA Y REARRANCA un servicio compartido. Por eso esta fuera de
@@ -45,8 +50,8 @@ import { observarDashboard, leerDom, enviarRespuesta, esperarCambio, reverbVivo 
 const fx = loadFixture();
 const survey = fx.surveys.active;
 
-const SHOTS = resolve(ROOT, 'storage/app/screenshots/f6c');
-const DATOS = resolve(ROOT, 'storage/app/f6c');
+const SHOTS = resolve(ROOT, 'storage/app/screenshots/f6d');
+const DATOS = resolve(ROOT, 'storage/app/f6d');
 mkdirSync(SHOTS, { recursive: true });
 mkdirSync(DATOS, { recursive: true });
 
@@ -178,14 +183,17 @@ test('CA-08.6a · @caida Reverb cae con el usuario conectado: el dashboard REACC
     await ctx.close();
 });
 
-test('CA-08.6b · @caida DEF-05: tras la caida el SONDEO no recupera el refresco', async ({ browser, playwright }) => {
+test('CA-08.6b · @caida tras la caida el SONDEO recupera el refresco', async ({ browser, playwright }) => {
     /*
      * La mitad que de verdad importa: no "¿cambia algo en pantalla?" sino
      * "¿lo hace el respaldo?". Se exige una llamada `refreshStats` observada.
      *
-     * test.fail() mientras DEF-05 siga abierto.
+     * Fase 6d: se retira `test.fail()`. DEF-05 esta corregido y esta prueba
+     * debe pasar LIMPIAMENTE. Mantenerla marcada como fallo esperado cuando ya
+     * pasa seria una mentira en verde: Playwright cuenta un fallo esperado
+     * como "passed" y el informe no distinguiria un defecto documentado de un
+     * criterio cumplido.
      */
-    test.fail(true, 'DEF-05: la CSP sin unsafe-eval impide que wire:poll ejecute refreshStats');
     test.setTimeout(300_000);
     test.skip(!(await reverbVivo()), 'Reverb debe estar EN PIE al empezar: es el supuesto de la prueba');
 
@@ -223,7 +231,8 @@ test('CA-08.6b · @caida DEF-05: tras la caida el SONDEO no recupera el refresco
         cambio_en_pantalla: cambio.cambio,
         espera_ms: cambio.ms,
         peticiones_tras_envio: obs.resumen(marca),
-        sondeos_emitidos: obs.sondeos(marca),
+        sondeos_intentados: obs.sondeos(marca),
+        sondeos_que_llegaron_al_servidor: obs.sondeosServidos(marca),
         puentes_emitidos: obs.puentes(marca),
         errores_csp: obs.erroresCsp.length,
     };
@@ -239,8 +248,12 @@ test('CA-08.6b · @caida DEF-05: tras la caida el SONDEO no recupera el refresco
      * haberlo pedido el SONDEO. Sin esta linea la prueba pasaria por el
      * rebote de `setConnectionState` y certificaria un respaldo que no existe.
      */
-    expect(obs.sondeos(marca),
-        'DEF-05: el respaldo debe emitir al menos un refreshStats tras la caida')
+    expect(obs.sondeosServidos(marca),
+        'el respaldo debe LLEGAR al servidor con al menos un refreshStats tras la caida')
         .toBeGreaterThan(0);
     expect(cambio.cambio, 'y el contador debe subir por esa via').toBeTruthy();
+
+    // Nucleo de DEF-05: la evaluacion de la directiva ya no la aborta la CSP.
+    expect(obs.erroresCsp.length,
+        'con csp_safe no debe quedar ningun error de evaluacion').toBe(0);
 });

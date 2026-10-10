@@ -45,6 +45,13 @@ export const LIVEWIRE_UPDATE = /\/livewire[^/]*\/update$/;
 export const METODOS_SONDEO = ['refreshStats'];
 /** Metodos que indican que el refresco lo pidio el PUENTE del WebSocket. */
 export const METODOS_PUENTE = ['onStatsUpdated', 'onTextReceived'];
+/*
+ * Metodos que NO refrescan por diseno pero que, por ser una ida y vuelta a
+ * Livewire, re-renderizan el componente y mueven los numeros DE REBOTE.
+ * `setConnectionState` es el caso real que produjo un verde falso en la
+ * Fase 6c: con Reverb caido, cada reintento de Echo lo invoca.
+ */
+export const METODOS_REBOTE = ['setConnectionState'];
 
 /** Extrae los nombres de metodo invocados en un cuerpo de peticion Livewire. */
 export function metodosDe(body) {
@@ -77,17 +84,49 @@ export function observarDashboard(page) {
         ws.on('framereceived', (f) => frames.push({ at: Date.now() - t0, payload: String(f.payload) }));
     });
 
+    /*
+     * ------------------------------------------------------------------
+     * ATENCION: `request` SE EMITE AL INTENTARLO, NO AL LLEGAR AL SERVIDOR
+     * ------------------------------------------------------------------
+     * Fase 6d. Playwright emite `request` cuando el navegador INICIA la
+     * peticion, incluso si despues `page.route()` la ABORTA. Mientras DEF-05
+     * estuvo abierto esa diferencia no se notaba: el sondeo no intentaba
+     * nada, el contador valia 0, y afirmar "ningun refreshStats llego al
+     * servidor" resultaba cierto POR ACCIDENTE.
+     *
+     * Con el sondeo ya operativo la diferencia es decisiva: en una medida
+     * real se observaron 4 intentos y 4 abortados, es decir CERO llegadas,
+     * y sin embargo el contador de intentos marcaba 4. Usarlo como prueba de
+     * exclusion habria sido medir una cosa y afirmar otra.
+     *
+     * Por eso cada peticion se marca cuando RECIBE RESPUESTA. La exclusion se
+     * comprueba con `sondeosServidos()`, no con `sondeos()`.
+     */
+    const porPeticion = new Map();
+
     page.on('request', (req) => {
         if (req.method() !== 'POST') return;
         let pathname;
         try { pathname = new URL(req.url()).pathname; } catch { return; }
         if (!LIVEWIRE_UPDATE.test(pathname)) return;
-        peticiones.push({ at: Date.now() - t0, metodos: metodosDe(req.postData()) });
+        const entrada = { at: Date.now() - t0, metodos: metodosDe(req.postData()), servida: false };
+        peticiones.push(entrada);
+        porPeticion.set(req, entrada);
+    });
+
+    // Solo hay respuesta si la peticion NO fue abortada: llego al servidor.
+    page.on('response', (res) => {
+        const entrada = porPeticion.get(res.request());
+        if (entrada) entrada.servida = true;
     });
 
     const cuenta = (lista, desde = 0) => peticiones
         .slice(desde)
         .filter((p) => p.metodos.some((m) => lista.includes(m))).length;
+
+    const cuentaServidas = (lista, desde = 0) => peticiones
+        .slice(desde)
+        .filter((p) => p.servida && p.metodos.some((m) => lista.includes(m))).length;
 
     return {
         peticiones,
@@ -96,9 +135,17 @@ export function observarDashboard(page) {
         marca: () => peticiones.length,
         sondeos: (desde = 0) => cuenta(METODOS_SONDEO, desde),
         puentes: (desde = 0) => cuenta(METODOS_PUENTE, desde),
+        rebotes: (desde = 0) => cuenta(METODOS_REBOTE, desde),
+        /** Sondeos que de verdad LLEGARON al servidor (no abortados). */
+        sondeosServidos: (desde = 0) => cuentaServidas(METODOS_SONDEO, desde),
+        /** Puentes que de verdad LLEGARON al servidor (no abortados). */
+        puentesServidos: (desde = 0) => cuentaServidas(METODOS_PUENTE, desde),
+        /** Rebotes de `setConnectionState` que LLEGARON al servidor. */
+        rebotesServidos: (desde = 0) => cuentaServidas(METODOS_REBOTE, desde),
         framesStats: () => frames.filter((f) => f.payload.includes('stats.updated')).length,
         suscrito: () => frames.some((f) => f.payload.includes('subscription_succeeded')),
-        resumen: (desde = 0) => peticiones.slice(desde).map((p) => `+${p.at}ms ${p.metodos.join('|') || '(sin calls)'}`),
+        resumen: (desde = 0) => peticiones.slice(desde)
+            .map((p) => `+${p.at}ms ${p.metodos.join('|') || '(sin calls)'}${p.servida ? '' : ' [ABORTADA]'}`),
     };
 }
 
@@ -121,6 +168,39 @@ export async function bloquearSondeo(page) {
         return route.fallback();
     });
     return { abortadas, total: () => abortadas.length };
+}
+
+/**
+ * EXCLUSION ACTIVA, ESPEJO DE `bloquearSondeo`: aborta todo lo que NO sea un
+ * sondeo (rebote de `setConnectionState`, puente `onStatsUpdated`, ...), y deja
+ * pasar unicamente `refreshStats`.
+ *
+ * POR QUE HACE FALTA (Fase 6d). Mientras el sondeo estuvo muerto (DEF-05) la
+ * unica confusion posible era atribuir AL WEBSOCKET lo que hacia el sondeo.
+ * Con el sondeo ya operativo la confusion se vuelve simetrica, y ademas sigue
+ * viva la trampa concreta que me colo un verde falso en la Fase 6c: el
+ * contador subia de rebote por `setConnectionState`, no por el sondeo.
+ *
+ * Con este bloqueo, si el contador sube, SOLO ha podido pedirlo `refreshStats`:
+ * a ninguna otra llamada se le permitio llegar al servidor.
+ */
+export async function bloquearRebote(page) {
+    const abortadas = [];
+    await page.route(LIVEWIRE_UPDATE, async (route) => {
+        const req = route.request();
+        const metodos = metodosDe(req.postData());
+        const esSondeo = metodos.some((m) => METODOS_SONDEO.includes(m));
+        if (!esSondeo) {
+            abortadas.push({ at: Date.now(), metodos });
+            return route.abort();
+        }
+        return route.fallback();
+    });
+    return {
+        abortadas,
+        total: () => abortadas.length,
+        resumen: () => abortadas.map((a) => a.metodos.join('|') || '(sin calls)'),
+    };
 }
 
 /** Estado del dashboard tal y como lo ve el navegador. */
