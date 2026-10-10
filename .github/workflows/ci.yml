@@ -1,0 +1,340 @@
+# =============================================================================
+# EncuestaLive — Integración continua
+# =============================================================================
+#
+#   *** NO VERIFICADO: este flujo de trabajo NUNCA se ha ejecutado. ***
+#
+#   No hay runner de GitHub Actions en el host de la fábrica y el repositorio
+#   no está publicado en ninguna forja. Lo único comprobado aquí es que el
+#   YAML carga sin errores (js-yaml 4) y que los comandos que invoca son los
+#   mismos que SÍ se han ejecutado a mano en este host (`php artisan test`,
+#   `php artisan schedule:list`, `npm run build`, `composer audit`).
+#
+#   Su valor real es otro: es el sitio donde por fin SE CONSTRUIRÁ la imagen
+#   de Docker. El trabajo `docker` de abajo es, literalmente, la verificación
+#   que la Fase 8 no ha podido hacer. Mientras ese trabajo no pase en verde,
+#   `Dockerfile` y `docker-compose.yml` siguen siendo NO VERIFICADOS.
+#
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [master, "fase*/**"]
+  pull_request:
+    branches: [master]
+
+# Un push nuevo cancela la ejecución anterior de la misma rama: no tiene
+# sentido gastar minutos validando un commit ya superado.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PHP_VERSION: "8.4"
+  NODE_VERSION: "24"
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # 1 · Suite de pruebas sobre SQLite (el motor de desarrollo, ADR-0003)
+  # ---------------------------------------------------------------------------
+  tests-sqlite:
+    name: Pruebas · SQLite
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: bcmath, exif, gd, intl, mbstring, pcntl, pdo_sqlite, sockets, zip
+          coverage: none
+          ini-values: error_reporting=E_ALL
+
+      - name: Caché de Composer
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparar entorno
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          touch database/database.sqlite
+
+      - run: php artisan migrate --force
+
+      # ---------------------------------------------------------------------
+      # GUARDA DE REGRESIÓN DEL HALLAZGO F-13 (ALTO)
+      # ---------------------------------------------------------------------
+      # La retención de 30 días estuvo todo el proyecto sin ejecutarse porque
+      # nadie había registrado las purgas en el planificador, y la ausencia de
+      # una tarea programada NO PRODUCE NINGÚN SÍNTOMA VISIBLE: la aplicación
+      # funciona perfectamente mientras incumple en silencio lo que su propia
+      # página de privacidad le promete al participante.
+      #
+      # Por eso se comprueba aquí explícitamente, además de en la suite. Si
+      # alguien refactoriza `routes/console.php` y se lleva por delante estas
+      # dos líneas, el CI lo para. Es exactamente el tipo de fallo que solo se
+      # detecta con una aserción deliberada.
+      - name: "F-13 · el planificador NO puede estar vacío"
+        run: |
+          echo "— Tareas registradas —"
+          php artisan schedule:list
+          php artisan schedule:list | grep -q 'encuestalive:prune-security-events' \
+            || { echo "::error::F-13 REGRESIÓN: la purga de security_events no está programada. La retención de 30 días no se ejecutaría y la página pública de privacidad estaría mintiendo."; exit 1; }
+          php artisan schedule:list | grep -q 'encuestalive:prune-sessions' \
+            || { echo "::error::F-13 REGRESIÓN: la purga de participant_sessions no está programada."; exit 1; }
+
+      - name: "Las purgas se ejecutan de verdad (en seco)"
+        run: |
+          php artisan encuestalive:prune-security-events --dry-run
+          php artisan encuestalive:prune-sessions --dry-run
+
+      - run: php artisan test
+
+  # ---------------------------------------------------------------------------
+  # 2 · Suite sobre MySQL 8 — LO QUE NO SE PUDO HACER EN LA FÁBRICA
+  # ---------------------------------------------------------------------------
+  # D-04 declara MySQL 8 como destino y obliga a declarar qué queda sin
+  # verificar por no haber MySQL en el host. Este trabajo es el que cierra ese
+  # hueco: en el runner SÍ hay un MySQL 8 de servicio.
+  #
+  # Importa especialmente por F-05: SQLite no aplica longitudes de VARCHAR y
+  # acepta un título de 5000 caracteres en una columna de 150; MySQL en modo
+  # estricto lo rechaza. Esa clase de defecto SOLO aparece aquí.
+  #
+  # `continue-on-error: true` deliberado al principio: nadie ha ejecutado
+  # nunca la suite contra MySQL y es previsible que aparezcan diferencias de
+  # motor. Debe quitarse en cuanto pase en verde una vez; dejarlo para siempre
+  # sería tener un trabajo decorativo.
+  tests-mysql:
+    name: Pruebas · MySQL 8 (destino declarado D-04)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-solo-para-el-runner
+          MYSQL_DATABASE: encuestalive_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: bcmath, exif, gd, intl, mbstring, pcntl, pdo_mysql, sockets, zip
+          coverage: none
+
+      - run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparar entorno MySQL
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          {
+            echo
+            echo "DB_CONNECTION=mysql"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=3306"
+            echo "DB_DATABASE=encuestalive_test"
+            echo "DB_USERNAME=root"
+            echo "DB_PASSWORD=ci-solo-para-el-runner"
+          } >> .env
+
+      - name: "Modo estricto activo (si no, F-05 no se detectaría)"
+        run: |
+          mysql -h 127.0.0.1 -u root -pci-solo-para-el-runner \
+            -e "SET GLOBAL sql_mode='STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'; SELECT @@GLOBAL.sql_mode;"
+
+      - name: "Migraciones desde base vacía (DoD §3)"
+        run: php artisan migrate --force
+
+      - run: php artisan test
+
+  # ---------------------------------------------------------------------------
+  # 3 · Estilo de código
+  # ---------------------------------------------------------------------------
+  pint:
+    name: Estilo · Pint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: vendor/bin/pint --test
+
+  # ---------------------------------------------------------------------------
+  # 4 · Assets
+  # ---------------------------------------------------------------------------
+  assets:
+    name: Assets · Vite
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # --include=dev es OBLIGATORIO. Vite y Tailwind son devDependencies; sin
+      # ellas `npm run build` no existe. (BRIEF §15.2: la config global de npm
+      # de la fábrica trae `omit=dev` y `npm ls` llega a mentir diciendo que el
+      # árbol está vacío.)
+      - run: npm ci --include=dev --no-audit --no-fund
+      - run: npm run build
+
+      - name: "El manifiesto existe y no está vacío"
+        run: |
+          test -s public/build/manifest.json
+          echo "entradas en el manifiesto: $(grep -o '"file"' public/build/manifest.json | wc -l)"
+
+      # -------------------------------------------------------------------
+      # Que NINGÚN secreto acabe en el bundle JavaScript.
+      # -------------------------------------------------------------------
+      # `VITE_REVERB_APP_KEY` es pública por diseño y debe estar ahí.
+      # `REVERB_APP_SECRET` jamás. Vite solo expone lo que lleva prefijo
+      # `VITE_`, pero esto es barato y protege contra que alguien añada un
+      # `VITE_REVERB_APP_SECRET` «para que funcione».
+      - name: "Ningún secreto en el bundle"
+        run: |
+          if grep -rIl --exclude='*.map' -e 'REVERB_APP_SECRET' -e 'APP_KEY' public/build/ 2>/dev/null | grep -q .; then
+            echo "::error::Se ha encontrado una referencia a un secreto dentro de public/build/."
+            exit 1
+          fi
+          echo "OK: sin referencias a secretos en los assets compilados."
+
+  # ---------------------------------------------------------------------------
+  # 5 · Dependencias vulnerables
+  # ---------------------------------------------------------------------------
+  auditoria:
+    name: Auditoría de dependencias
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: composer audit
+      # `--omit=dev`: una vulnerabilidad en Vite o Playwright no llega a
+      # producción, y tratarla como bloqueante enseña al equipo a ignorar el
+      # CI, que es mucho peor que el riesgo que evita.
+      - run: npm audit --omit=dev --audit-level=high
+
+  # ---------------------------------------------------------------------------
+  # 6 · DOCKER — AQUÍ SE VERIFICA LO QUE LA FASE 8 NO PUDO VERIFICAR
+  # ---------------------------------------------------------------------------
+  # Hasta que este trabajo pase en verde, `Dockerfile` y `docker-compose.yml`
+  # son NO VERIFICADOS y así deben constar en el informe final (D-09).
+  #
+  # No se publica ninguna imagen ni se despliega nada: BRIEF §13 exige
+  # autorización explícita del propietario para eso. Esto solo construye y
+  # levanta la pila en el runner, comprueba la salud y la derriba.
+  docker:
+    name: Docker · construir y levantar (verificación pendiente)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Validar la sintaxis del Compose"
+        run: docker compose config --quiet
+        env:
+          APP_KEY: base64:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA=
+          APP_URL: http://127.0.0.1:8080
+          MYSQL_PASSWORD: ci-solo-para-el-runner
+          MYSQL_ROOT_PASSWORD: ci-solo-para-el-runner
+          REVERB_APP_KEY: ci-key
+          REVERB_APP_SECRET: ci-secret
+          PUBLIC_REVERB_HOST: 127.0.0.1
+          PUBLIC_REVERB_PORT: "8080"
+          PUBLIC_REVERB_SCHEME: http
+
+      - name: "Construir las dos imágenes"
+        run: |
+          docker compose build --progress plain
+        env:
+          APP_KEY: base64:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA=
+          APP_URL: http://127.0.0.1:8080
+          MYSQL_PASSWORD: ci-solo-para-el-runner
+          MYSQL_ROOT_PASSWORD: ci-solo-para-el-runner
+          REVERB_APP_KEY: ci-key
+          REVERB_APP_SECRET: ci-secret
+          PUBLIC_REVERB_HOST: 127.0.0.1
+          PUBLIC_REVERB_PORT: "8080"
+          PUBLIC_REVERB_SCHEME: http
+
+      - name: "Levantar y esperar a que TODO esté sano"
+        env:
+          APP_ENV: production
+          APP_DEBUG: "false"
+          APP_KEY: base64:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA=
+          APP_URL: http://127.0.0.1:8080
+          SESSION_SECURE_COOKIE: "false"
+          MYSQL_PASSWORD: ci-solo-para-el-runner
+          MYSQL_ROOT_PASSWORD: ci-solo-para-el-runner
+          REVERB_APP_KEY: ci-key
+          REVERB_APP_SECRET: ci-secret
+          PUBLIC_REVERB_HOST: 127.0.0.1
+          PUBLIC_REVERB_PORT: "8080"
+          PUBLIC_REVERB_SCHEME: http
+        run: |
+          docker compose up -d
+          echo "Esperando health checks (máx. 180 s)…"
+          for i in $(seq 1 36); do
+            malos=$(docker compose ps --format '{{.Service}} {{.Health}}' | awk '$2 != "healthy" {print $1}')
+            [ -z "$malos" ] && { echo "Todos los servicios sanos."; break; }
+            echo "  pendientes: $malos"
+            sleep 5
+          done
+          docker compose ps
+          [ -z "$(docker compose ps --format '{{.Service}} {{.Health}}' | awk '$2 != "healthy" {print $1}')" ]
+
+      - name: "Migrar y comprobar de extremo a extremo"
+        run: |
+          docker compose exec -T app php artisan migrate --force
+          curl -fsS http://127.0.0.1:8080/up
+          echo
+          echo "— El planificador dentro del contenedor —"
+          docker compose exec -T scheduler php artisan schedule:list
+          echo "— El bucle del planificador late —"
+          docker compose exec -T scheduler sh -c 'test -f /tmp/scheduler-heartbeat && echo "latido: $(cat /tmp/scheduler-heartbeat)"'
+
+      - name: "La aplicación NO corre como root"
+        run: |
+          for s in app reverb scheduler; do
+            u=$(docker compose exec -T "$s" id -un)
+            echo "$s -> $u"
+            [ "$u" != "root" ] || { echo "::error::$s corre como root"; exit 1; }
+          done
+
+      - name: "Logs si algo ha fallado"
+        if: failure()
+        run: docker compose logs --tail 200
+
+      - name: Derribar
+        if: always()
+        run: docker compose down -v
