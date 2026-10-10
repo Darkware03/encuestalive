@@ -37,6 +37,23 @@ export default defineConfig({
     workers: 1,
     forbidOnly: true,
     retries: 0,
+    /*
+     * ============ EXCLUSION DE LAS PRUEBAS ETIQUETADAS `@caida` ============
+     * Fase 6c. `ca08-caida.spec.mjs` MATA Y REARRANCA Reverb en mitad de la
+     * ejecucion para reproducir el escenario real de un evento con mala red.
+     * Con workers:1 y servicios compartidos, dejarla en la bateria por
+     * defecto haria que las pruebas vecinas fallasen por un motivo ajeno a lo
+     * que miden, que es justo la clase de ruido que invalida un informe.
+     *
+     * Se ejecuta a proposito y por separado:
+     *   E2E_INCLUIR_CAIDA=1 npx playwright test tests/e2e/ca08-caida.spec.mjs
+     *
+     * Se excluye por ETIQUETA y no con `testIgnore` precisamente para que siga
+     * siendo ejecutable cuando se pide: un fichero ignorado no se puede correr
+     * ni queriendo, y una prueba que no se puede correr acaba pudriendose.
+     * =======================================================================
+     */
+    grepInvert: process.env.E2E_INCLUIR_CAIDA ? undefined : /@caida/,
     reporter: [
         ['list'],
         ['json', { outputFile: 'storage/app/f6/playwright-report.json' }],
