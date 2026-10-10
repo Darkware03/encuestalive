@@ -1,0 +1,77 @@
+#
+# MySQL 8.4 — EncuestaLive (NO VERIFICADO: nunca ejecutado, no hay Docker aquí)
+#
+# D-04 declara MySQL 8 como motor de destino. Desarrollo va sobre SQLite, y esa
+# diferencia es una fuente real de fallos que solo aparecen en producción.
+# Este fichero existe para que MySQL sea TAN ESTRICTO como pueda, de modo que
+# cualquier divergencia estalle en el primer despliegue de preproducción y no
+# el día del evento.
+#
+[mysqld]
+
+# -----------------------------------------------------------------------------
+# Juego de caracteres
+# -----------------------------------------------------------------------------
+# utf8mb4 completo: las respuestas de texto libre llevan tildes, ñ y emoji.
+# `utf8mb3` truncaría los emoji y es el valor heredado que todavía arrastran
+# muchas guías.
+character-set-server = utf8mb4
+collation-server     = utf8mb4_unicode_ci
+
+# -----------------------------------------------------------------------------
+# MODO ESTRICTO — esto es lo que atrapa el hallazgo F-05
+# -----------------------------------------------------------------------------
+# F-05 (MEDIO): `SurveyService::create()/update()` escriben `title` sin validar
+# longitud. SQLite NO aplica longitudes de VARCHAR y lo acepta en silencio;
+# MySQL 8 en modo estricto lo RECHAZA con error. Es exactamente el fallo que
+# «funciona en desarrollo y revienta en producción».
+#
+# Dejarlo estricto es deliberado: preferimos un error ruidoso en
+# preproducción a un truncado silencioso de los datos del usuario.
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+# -----------------------------------------------------------------------------
+# Zona horaria
+# -----------------------------------------------------------------------------
+# UTC en el servidor, siempre. La aplicación formatea en local al mostrar.
+# `security_events.occurred_at` se trunca al minuto para mitigar la correlación
+# temporal (ARCHITECTURE.md §7.3); un desfase de zona horaria entre PHP y MySQL
+# convertiría esa truncatura en ruido inútil.
+default-time-zone = '+00:00'
+
+# -----------------------------------------------------------------------------
+# Dimensionado conservador
+# -----------------------------------------------------------------------------
+# Pensado para un servidor pequeño (2 vCPU / 2-4 GB). Es el perfil del MVP:
+# 300 sesiones simultáneas con escrituras cortas.
+#
+# NO VERIFICADO: no se ha medido nada. Son valores de partida razonados.
+innodb_buffer_pool_size      = 512M
+innodb_log_file_size         = 128M
+innodb_flush_log_at_trx_commit = 1
+innodb_flush_method          = O_DIRECT
+max_connections              = 100
+
+# -----------------------------------------------------------------------------
+# Registro
+# -----------------------------------------------------------------------------
+# El log de consultas lentas ayuda a detectar el agregado de estadísticas
+# degradándose cuando una encuesta crece. 1 s es generoso: ninguna consulta de
+# `StatsService` debería acercarse.
+slow_query_log       = 1
+slow_query_log_file  = /var/lib/mysql/slow.log
+long_query_time      = 1
+
+# El log general NUNCA se activa en producción: registraría cada sentencia,
+# incluidas las que contienen texto libre de participantes. Sería un tercer
+# almacén de datos personales fuera de control, justo lo que el brief §5.2
+# prohíbe. Se deja explícito para que nadie lo active «solo un rato».
+general_log = 0
+
+# El binlog es necesario para recuperación a un punto en el tiempo (PITR).
+# Se activa a propósito: con él, un respaldo diario + binlogs permite restaurar
+# al minuto anterior al incidente, no al de ayer por la noche.
+# Ver OPERATIONS.md §3.
+log_bin                 = /var/lib/mysql/binlog
+binlog_expire_logs_seconds = 604800   # 7 días
+max_binlog_size            = 128M

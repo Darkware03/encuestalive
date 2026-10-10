@@ -1,0 +1,391 @@
+# =============================================================================
+# EncuestaLive — orquestación de servicios
+# =============================================================================
+#
+#            ███  E S T A D O :   N O   V E R I F I C A D O  ███
+#
+#   Este fichero NUNCA se ha ejecutado. Ni `docker compose config`, ni
+#   `build`, ni `up`. El host de la fábrica (`c9bb1cd3a76d`) no tiene Docker,
+#   ni root, ni sudo, y `/var/lib/apt` no es escribible: BRIEF §15 y D-09 lo
+#   dan por insalvable.
+#
+#   Lo único que se ha comprobado de verdad:
+#     · que el YAML es sintácticamente válido y carga sin errores
+#       (`python3 -c "import yaml; yaml.safe_load(...)"`);
+#     · que la estructura de claves es la que espera la especificación de
+#       Compose, revisada a mano servicio por servicio.
+#
+#   Eso NO es lo mismo que «funciona». Nadie ha visto arrancar un contenedor.
+#   La primera persona que ejecute esto debe tratarlo como un borrador
+#   revisado y seguir la lista de DEPLOYMENT.md §9.
+#
+#   La ruta de arranque que SÍ está verificada en ejecución es la local sin
+#   Docker: INSTALLATION.md, recorrida de principio a fin el 2026-10-09.
+#
+# -----------------------------------------------------------------------------
+# Cumplimiento del BRIEF §12 (seguridad operativa), punto por punto:
+#   · Servicios aislados ................ cada uno en su contenedor, dos redes.
+#   · Socket de Docker .................. NO se monta. En ningún servicio.
+#   · Sistema de ficheros del host ...... NO se monta nada del host salvo tres
+#                                         ficheros de configuración de solo
+#                                         lectura. Cero bind mounts de datos.
+#   · Volúmenes persistentes ............ solo `db-data` y `app-storage`.
+#   · Credenciales en el repositorio .... ninguna. Las variables sin valor por
+#                                         defecto usan la sintaxis `${VAR:?...}`
+#                                         y Compose SE NIEGA a arrancar si
+#                                         faltan, en lugar de inventarse una.
+#   · Privilegios ....................... `no-new-privileges` en todos,
+#                                         `cap_drop: [ALL]` donde es posible,
+#                                         usuarios sin privilegios.
+# =============================================================================
+
+name: encuestalive
+
+# -----------------------------------------------------------------------------
+# Anclas reutilizables
+# -----------------------------------------------------------------------------
+x-php-image: &php-image
+  image: encuestalive/app:${ENCUESTALIVE_TAG:-dev}
+  build:
+    context: .
+    target: app
+    args:
+      VITE_APP_NAME: ${APP_NAME:-EncuestaLive}
+      VITE_REVERB_APP_KEY: "${REVERB_APP_KEY:?define REVERB_APP_KEY}"
+      VITE_REVERB_HOST: "${PUBLIC_REVERB_HOST:?define PUBLIC_REVERB_HOST, el host por el que el NAVEGADOR abre el WebSocket}"
+      VITE_REVERB_PORT: ${PUBLIC_REVERB_PORT:-443}
+      VITE_REVERB_SCHEME: ${PUBLIC_REVERB_SCHEME:-https}
+
+x-php-env: &php-env
+  # ---------------------------------------------------------------------------
+  # NO hay fichero `.env` dentro de las imágenes: se borra en el Dockerfile.
+  # La configuración entra por entorno, que es lo que permite usar el mismo
+  # artefacto en preproducción y producción sin reconstruirlo.
+  # ---------------------------------------------------------------------------
+  APP_NAME: ${APP_NAME:-EncuestaLive}
+  APP_ENV: ${APP_ENV:-production}
+  # Generar UNA vez con `php artisan key:generate --show`. Nunca en el arranque:
+  # cambiarla invalida las cookies firmadas y el token opaco de participante
+  # (ADR-0005), que es lo que impide respuestas duplicadas.
+  APP_KEY: "${APP_KEY:?define APP_KEY}"
+  APP_DEBUG: "${APP_DEBUG:-false}"
+  # APP_URL debe ser el origen EXACTO por el que se sirve. La CSP
+  # `default-src 'self'` trata `localhost` y `127.0.0.1` como orígenes
+  # DISTINTOS: si no coinciden, el navegador bloquea el CSS, el JS y el envío
+  # del formulario público, y no aparece ni un error en el servidor.
+  APP_URL: "${APP_URL:?define APP_URL}"
+  APP_LOCALE: ${APP_LOCALE:-es}
+  APP_FALLBACK_LOCALE: ${APP_FALLBACK_LOCALE:-en}
+
+  LOG_CHANNEL: stack
+  # `stderr` y no `single`. El canal `stderr` existe en config/logging.php:105
+  # y escribe en `php://stderr`, de modo que los logs salen por `docker logs` y
+  # los recoge el demonio, que ya los rota (ver `x-logging`). Con `single`
+  # acabarían en `storage/logs/laravel.log` dentro del volumen, donde nadie los
+  # rota y crecen hasta llenar el disco.
+  LOG_STACK: stderr
+  LOG_LEVEL: ${LOG_LEVEL:-warning}
+
+  # --- Base de datos (D-04: MySQL 8 es el destino declarado) ---------------
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_DATABASE: ${MYSQL_DATABASE:-encuestalive}
+  DB_USERNAME: ${MYSQL_USER:-encuestalive}
+  DB_PASSWORD: "${MYSQL_PASSWORD:?define MYSQL_PASSWORD}"
+
+  # --- Sesión (D-11: `file`, NUNCA `database`) ------------------------------
+  # Con `database`, la tabla `sessions` del framework guardaría ip_address y
+  # user_agent de TODO visitante, participantes anónimos incluidos: un segundo
+  # almacén de IP que contradice el brief §5.2.
+  SESSION_DRIVER: file
+  SESSION_LIFETIME: "120"
+  SESSION_ENCRYPT: "true"
+  SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-true}
+
+  # --- Caché y colas --------------------------------------------------------
+  # `database` y no Redis: ver la nota «¿Por qué no hay Redis?» más abajo.
+  CACHE_STORE: database
+  QUEUE_CONNECTION: database
+  FILESYSTEM_DISK: local
+
+  # --- Tiempo real (D-02, F-07) --------------------------------------------
+  # `reverb` y jamás `log` ni `null`: esos difusores tienen `auth()` vacío y
+  # anulan por completo la autorización de canales privados.
+  BROADCAST_CONNECTION: reverb
+  REVERB_APP_ID: ${REVERB_APP_ID:-encuestalive}
+  REVERB_APP_KEY: "${REVERB_APP_KEY:?define REVERB_APP_KEY}"
+  # Un valor real y largo, NUNCA el de la plantilla de .env.example.
+  REVERB_APP_SECRET: "${REVERB_APP_SECRET:?define REVERB_APP_SECRET}"
+  # Desde dentro de la red de Compose, el servidor publica contra el
+  # contenedor; el navegador entra por nginx. Son dos rutas distintas y es
+  # normal que los valores no coincidan.
+  REVERB_HOST: reverb
+  REVERB_PORT: "8080"
+  REVERB_SCHEME: http
+
+  # --- Dominio (D-12) -------------------------------------------------------
+  PRESENCE_HEARTBEAT_SECONDS: "20"
+  PRESENCE_EXPIRY_SECONDS: "60"
+  SECURITY_LOG_RETENTION_DAYS: ${SECURITY_LOG_RETENTION_DAYS:-30}
+  SESSION_RETENTION_DAYS: ${SESSION_RETENTION_DAYS:-30}
+  PARTICIPANT_TOKEN_TTL_MINUTES: "1440"
+
+x-logging: &logging
+  # Rotación de logs en el propio demonio. Sin esto, `docker logs` crece sin
+  # techo hasta llenar el disco: es una de las causas más comunes de caída de
+  # un servidor pequeño. Ver OPERATIONS.md §4.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # web · nginx sin privilegios
+  # ---------------------------------------------------------------------------
+  web:
+    <<: *hardening
+    image: encuestalive/web:${ENCUESTALIVE_TAG:-dev}
+    build:
+      context: .
+      target: web
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      # Se publica SOLO en la interfaz de loopback del servidor. El TLS lo
+      # termina un proxy por delante (Caddy, Traefik, el nginx del host o un
+      # balanceador gestionado). Publicar esto en 0.0.0.0 expondría la
+      # aplicación por HTTP plano, con las cookies de sesión viajando en
+      # claro. Si se cambia, hay que saber exactamente por qué.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    networks:
+      - borde
+    tmpfs:
+      # nginx-unprivileged necesita escribir sus temporales; con esto el
+      # sistema de ficheros raíz puede ir en solo lectura.
+      - /tmp:mode=1777,size=32m
+      - /var/cache/nginx:mode=0700,uid=101,gid=101,size=64m
+      - /var/run:mode=0755,uid=101,gid=101,size=4m
+    read_only: true
+    cap_drop: [ALL]
+    healthcheck:
+      # Comprobación de extremo a extremo REAL: `/up` es la ruta de salud de
+      # Laravel (declarada en bootstrap/app.php), así que este check atraviesa
+      # nginx → FPM → framework. Si da verde, la pila web entera responde.
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:8080/up || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # app · PHP-FPM
+  # ---------------------------------------------------------------------------
+  app:
+    <<: [*php-image, *hardening]
+    environment:
+      <<: *php-env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - borde
+      - interna
+    volumes:
+      - app-storage:/var/www/html/storage
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-fpm"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 40s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # reverb · WebSocket (proceso aparte, como exige el enunciado)
+  # ---------------------------------------------------------------------------
+  # Va en su propio contenedor y NO comparte proceso con FPM por una razón
+  # concreta: `reverb:start` es un bucle de eventos de larga vida que mantiene
+  # cientos de sockets abiertos. Un reinicio de FPM por despliegue tiraría
+  # todas las conexiones; separados, se pueden reciclar por separado.
+  #
+  # Su puerto NO se publica al host: nginx lo alcanza por la red interna y lo
+  # expone bajo `/app` y `/apps`. Un servicio menos en el borde.
+  reverb:
+    <<: [*php-image, *hardening]
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    environment:
+      <<: *php-env
+      # Reverb no habla con la base de datos; no tiene sentido que su arranque
+      # dependa de ella.
+      ENCUESTALIVE_WAIT_FOR_DB: "0"
+      # `route:cache`/`view:cache` no le aportan nada y alargan el arranque.
+      ENCUESTALIVE_SKIP_OPTIMIZE: "1"
+    depends_on:
+      app:
+        condition: service_started
+    networks:
+      - borde
+    volumes:
+      - app-storage:/var/www/html/storage
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    cap_drop: [ALL]
+    ulimits:
+      # ARCHITECTURE.md R5: ReactPHP cae a `StreamSelectLoop`, que topa en
+      # ~1024 descriptores. El objetivo de D-05/PA-01 son 300 sesiones, así que
+      # hay margen, pero el límite por omisión del contenedor puede ser MENOR
+      # que eso y produciría un techo artificial muy por debajo.
+      nofile:
+        soft: 4096
+        hard: 8192
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-reverb"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # scheduler · EL SERVICIO QUE FALTABA (hallazgo F-13, ALTO)
+  # ---------------------------------------------------------------------------
+  # La Fase 7b registró las dos purgas en `routes/console.php`, y
+  # `php artisan schedule:list` ya las muestra. Pero registrar una tarea NO la
+  # ejecuta: el planificador de Laravel necesita que algo invoque
+  # `schedule:run` cada minuto. Hasta este contenedor, nadie lo hacía.
+  #
+  # Sin esto, la retención de 30 días (D-12) no se aplica NUNCA, la tabla
+  # `security_events` —único almacén de IP del sistema— crece sin límite
+  # temporal, y la página pública de privacidad le estaría prometiendo al
+  # participante algo falso. Por eso este servicio no es opcional.
+  #
+  # Alternativa sin Docker (una entrada de crontab del sistema): OPERATIONS.md §7.2.
+  scheduler:
+    <<: [*php-image, *hardening]
+    command: ["/usr/local/bin/scheduler"]
+    environment:
+      <<: *php-env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - interna
+    volumes:
+      - app-storage:/var/www/html/storage
+    tmpfs:
+      - /tmp:mode=1777,size=32m
+    cap_drop: [ALL]
+    healthcheck:
+      # El bucle escribe un latido en cada vuelta. Si el fichero tiene más de
+      # 180 s (tres ciclos), el bucle está colgado aunque el proceso siga
+      # vivo: justo el fallo silencioso que dejó F-13 sin ejecutar durante
+      # todo el proyecto.
+      # `$$` escapa el `$` para que lo reciba la shell del contenedor y no lo
+      # interpole Compose al leer el fichero.
+      test: ["CMD-SHELL", "test -f /tmp/scheduler-heartbeat && [ $$(( $$(date +%s) - $$(cat /tmp/scheduler-heartbeat) )) -lt 180 ]"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 90s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # db · MySQL 8.4 LTS  (D-04)
+  # ---------------------------------------------------------------------------
+  db:
+    <<: *hardening
+    image: mysql:8.4
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-encuestalive}
+      MYSQL_USER: ${MYSQL_USER:-encuestalive}
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?define MYSQL_PASSWORD}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?define MYSQL_ROOT_PASSWORD}"
+      TZ: UTC
+    networks:
+      # SOLO en la red interna, que está marcada `internal: true`: este
+      # contenedor no tiene salida a Internet ni es alcanzable desde el borde.
+      # Y su puerto 3306 NO se publica al host: si hace falta entrar, se entra
+      # con `docker compose exec`, no abriendo el puerto.
+      - interna
+    volumes:
+      - db-data:/var/lib/mysql
+      # Único contacto con el sistema de ficheros del host en todo el fichero:
+      # un .cnf de SOLO LECTURA. No es un montaje de datos.
+      - ./docker/mysql/encuestalive.cnf:/etc/mysql/conf.d/encuestalive.cnf:ro
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    healthcheck:
+      # LIMITACIÓN HONESTA: `mysqladmin ping` responde afirmativamente incluso
+      # si las credenciales son incorrectas; prueba que el demonio está vivo y
+      # acepta el protocolo, NO que la aplicación pueda autenticarse. Esa
+      # segunda comprobación la hace el entrypoint de `app` al conectar de
+      # verdad. No se usa un `SELECT 1` con credenciales porque la contraseña
+      # aparecería en la lista de procesos del host en cada latido.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    logging: *logging
+
+# =============================================================================
+# ¿POR QUÉ NO HAY REDIS?  (BRIEF §7: «no añadir servicios innecesarios al MVP»)
+# =============================================================================
+# Se ha evaluado, y la respuesta razonada es que no entra. Caso por caso:
+#
+#   · Presencia .......... ADR-0004 la resuelve con un heartbeat en la base de
+#                          datos (`participant_sessions.last_seen_at`). No hay
+#                          canal de presencia de Pusher ni estado en memoria.
+#   · Colas .............. los tres eventos de difusión implementan
+#                          `ShouldBroadcastNow` (verificado en app/Events/):
+#                          se emiten de forma SÍNCRONA. No hay worker de colas
+#                          en el sistema, luego no hay nada que encolar.
+#   · Rate limiting ...... el limitador usa el almacén de caché, y `database`
+#                          le sirve: son pocas claves y escrituras cortas.
+#   · Caché .............. igual; el volumen de datos cacheados es mínimo.
+#   · Escalado de Reverb . ESTE es el único caso real. Con MÁS DE UN proceso
+#                          web, `REVERB_SCALING_ENABLED=true` necesita Redis
+#                          para que un evento emitido por cualquier worker
+#                          llegue a todos los clientes (ARCHITECTURE.md §10.3).
+#                          El MVP es de un solo proceso, así que no aplica.
+#
+# CUÁNDO HABRÁ QUE AÑADIRLO, sin rodeos: en el momento en que se levante una
+# segunda réplica de `app` o de `reverb`. A partir de ahí, sin Redis, la mitad
+# de los dashboards dejaría de recibir eventos y el síntoma sería
+# desconcertante (unos admins ven los datos al instante y otros con 15 s de
+# retraso, según a qué proceso los asignó el balanceador).
+# =============================================================================
+
+networks:
+  borde:
+    driver: bridge
+  interna:
+    driver: bridge
+    # Sin salida a Internet y sin entrada desde fuera. La base de datos no
+    # tiene ninguna razón para descargar nada.
+    internal: true
+
+volumes:
+  db-data:
+    driver: local
+  app-storage:
+    # Compartido por `app`, `reverb` y `scheduler`. Contiene los ficheros de
+    # sesión (D-11: SESSION_DRIVER=file), las vistas compiladas y los logs de
+    # Laravel. NO contiene datos de encuestas: eso vive en MySQL.
+    driver: local

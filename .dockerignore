@@ -1,0 +1,88 @@
+# =============================================================================
+# EncuestaLive — contexto de construcción
+# =============================================================================
+# Dos motivos para cuidar este fichero, y el segundo importa más que el primero:
+#
+#   1. Velocidad. `vendor/` y `node_modules/` suman más de 100 MB que se
+#      enviarían al demonio de Docker en cada build para ser descartados
+#      inmediatamente (las etapas `vendor` y `assets` los reconstruyen desde
+#      los ficheros de bloqueo).
+#
+#   2. SEGURIDAD. Todo lo que entra en el contexto puede acabar en una capa de
+#      la imagen, y las capas de una imagen son públicas para quien tenga la
+#      imagen. `.env` contiene APP_KEY y REVERB_APP_SECRET. Un `COPY . .`
+#      descuidado los publicaría. El Dockerfile además los borra de forma
+#      explícita, pero la primera barrera es esta.
+# =============================================================================
+
+# --- Secretos. Lo primero, y por una razón. ---------------------------------
+.env
+.env.*
+!.env.example
+auth.json
+*.pem
+*.key
+storage/*.key
+
+# --- Dependencias: se reinstalan dentro del build ---------------------------
+vendor/
+node_modules/
+public/build/
+public/hot
+public/storage
+
+# --- Control de versiones y herramientas ------------------------------------
+.git/
+.github/
+.gitignore
+.gitattributes
+.editorconfig
+.npmrc
+
+# --- Datos locales ----------------------------------------------------------
+# Una base de datos SQLite de desarrollo dentro de una imagen de producción es
+# un accidente esperando a ocurrir: contendría datos de prueba y, peor, podría
+# usarse por error si DB_CONNECTION quedara mal configurada.
+database/database.sqlite
+database/*.sqlite
+database/*.sqlite-shm
+database/*.sqlite-wal
+
+storage/logs/
+storage/framework/cache/
+storage/framework/sessions/
+storage/framework/views/
+storage/framework/testing/
+storage/app/public/
+storage/app/private/
+storage/app/f6/
+storage/app/screenshots/
+storage/pail/
+
+# --- Pruebas y artefactos de QA ---------------------------------------------
+tests/
+playwright.config.mjs
+playwright-report/
+test-results/
+tools/
+phpunit.xml
+.phpunit.result.cache
+.phpunit.cache/
+
+# --- Documentación y ruido del editor ---------------------------------------
+*.md
+!README.md
+.idea/
+.vscode/
+.zed/
+.nova/
+.cursor/
+.codex/
+.phpactor.json
+_ide_helper.php
+.DS_Store
+Thumbs.db
+
+# --- El propio Compose: no se necesita dentro de la imagen ------------------
+docker-compose.yml
+docker-compose.*.yml
